@@ -13,7 +13,7 @@ crons = ["*/15 * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "pin-publisher-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "e259f6d1-7847-4b48-a78d-1e0465f3117d"
 migrations_dir = "migrations"
 
 # Secrets (never put these in this file -- set them with `wrangler secret put`):

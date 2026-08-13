@@ -88,6 +88,16 @@ def get_authorization_code(client_id: str) -> str:
     return _auth_code["code"]
 
 
+def list_boards(access_token: str) -> list[dict]:
+    request = urllib.request.Request(
+        "https://api.pinterest.com/v5/boards?page_size=100",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    with urllib.request.urlopen(request) as response:
+        data = json.loads(response.read())
+    return data.get("items") or []
+
+
 def exchange_code_for_tokens(client_id: str, client_secret: str, code: str) -> dict:
     basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     data = urllib.parse.urlencode({

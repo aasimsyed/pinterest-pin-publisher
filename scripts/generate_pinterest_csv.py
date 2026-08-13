@@ -15,13 +15,7 @@ API key resolution order:
        key to ~/.config/anthropic/config.json (chmod 600) for next time.
 
 Usage:
-    python scripts/generate_pinterest_csv.py \
-        --images-dir ./images \
-        --board "Budget Recipes & Meal Ideas" \
-        --url-prefix "http://yourfrugalmom.com/wp-content/uploads/2026/07/" \
-        --posts-per-day 3 \
-        --start-date 2026-07-22 \
-        --output pinterest_bulk_upload.csv
+    python scripts/generate_pinterest_csv.py
 
 Requires:
     pip install -r requirements.txt
@@ -33,11 +27,8 @@ import argparse
 import base64
 import csv
 import datetime
-import getpass
 import json
 import mimetypes
-import os
-import stat
 import sys
 from pathlib import Path
 from typing import Literal
@@ -49,6 +40,9 @@ from anthropic.types import (
     MessageParam,
     TextBlockParam,
 )
+
+from anthropic_auth import load_api_key
+from app_config import config_value, load_config
 
 # Pinterest bulk-upload column order (see Pinterest's help doc)
 FIELDNAMES = [
@@ -63,79 +57,6 @@ FIELDNAMES = [
 ]
 
 MODEL = "claude-sonnet-4-6"
-
-# Where to look for a saved API key, in priority order. The script checks
-# the environment variable first (useful for CI/servers), then falls back
-# to a small JSON config file in the home directory. The primary location
-# follows the ~/.config/<app>/config.json convention; the second is kept
-# for backward compatibility with earlier versions of this script.
-PRIMARY_CONFIG_PATH = Path.home() / ".config" / "anthropic" / "config.json"
-CONFIG_PATHS = [
-    PRIMARY_CONFIG_PATH,
-    Path.home() / ".anthropic" / "config.json",
-]
-
-
-def save_api_key(key: str, config_path: Path = PRIMARY_CONFIG_PATH) -> None:
-    """Write the key to config_path as {"api_key": ...} with owner-only perms."""
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(json.dumps({"api_key": key}, indent=2) + "\n")
-    os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)  # chmod 600
-
-
-def first_run_setup() -> str:
-    """Interactively prompt for an API key and save it for future runs."""
-    print("No Anthropic API key found.")
-    print(f"Let's set one up -- it'll be saved to {PRIMARY_CONFIG_PATH} "
-          f"(readable only by your user account) so you won't be asked again.\n")
-    print("Get a key at: https://console.anthropic.com/settings/keys\n")
-
-    while True:
-        key = getpass.getpass("Paste your Anthropic API key (input hidden): ").strip()
-        if key:
-            break
-        print("That was empty -- try again.")
-
-    save_api_key(key)
-    print(f"Saved to {PRIMARY_CONFIG_PATH}\n")
-    return key
-
-
-def load_api_key(cli_key: str | None) -> str:
-    """Resolve the Anthropic API key from (in order): --api-key flag,
-    ANTHROPIC_API_KEY env var, or a config.json in the home directory.
-    If none is found and the terminal is interactive, prompts for one
-    and saves it to ~/.config/anthropic/config.json for next time.
-
-    Expected config.json format:
-        {"api_key": "sk-ant-..."}
-    """
-    if cli_key:
-        return cli_key
-
-    env_key = os.environ.get("ANTHROPIC_API_KEY")
-    if env_key:
-        return env_key
-
-    for config_path in CONFIG_PATHS:
-        if config_path.exists():
-            try:
-                data = json.loads(config_path.read_text())
-            except json.JSONDecodeError:
-                continue
-            key = data.get("api_key") or data.get("ANTHROPIC_API_KEY")
-            if key:
-                return key
-
-    if sys.stdin.isatty():
-        return first_run_setup()
-
-    checked = "\n  ".join(str(p) for p in CONFIG_PATHS)
-    sys.exit(
-        "No Anthropic API key found. Set the ANTHROPIC_API_KEY environment "
-        "variable, pass --api-key, or create one of these files:\n  "
-        f"{checked}\ncontaining: {{\"api_key\": \"sk-ant-...\"}}"
-    )
 
 SYSTEM_PROMPT = """You are a Pinterest SEO specialist for a budget-recipe \
 and frugal-living blog. You will be shown one Pinterest pin graphic. \
@@ -325,13 +246,12 @@ def build_schedule(n: int, start_date: datetime.date, posts_per_day: int):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--images-dir", required=True, type=Path,
-                         help="Folder containing the pin image files")
-    parser.add_argument("--board", required=True,
-                         help='Pinterest board name, e.g. "Budget Recipes & Meal Ideas"')
-    parser.add_argument("--url-prefix", required=True,
-                         help="Public URL prefix to prepend to each filename, "
-                              "e.g. http://yourfrugalmom.com/wp-content/uploads/2026/07/")
+    parser.add_argument("--images-dir", default=None, type=Path,
+                         help="Folder of pin images. Default: images/ or setup value.")
+    parser.add_argument("--board", default=None,
+                         help="Pinterest board name. Default: value from setup.")
+    parser.add_argument("--url-prefix", default=None,
+                         help="Public URL folder for those images. Default: setup value.")
     parser.add_argument("--link", default="",
                          help="Destination URL to fill into the Link column for every pin")
     parser.add_argument("--posts-per-day", type=int, default=3)
@@ -352,14 +272,24 @@ def main():
                               "Pinterest's UI instead of bulk-uploading the CSV -- "
                               "bulk upload rejects duplicate titles.")
     args = parser.parse_args()
+    saved = load_config()
+    images_dir = args.images_dir or Path(config_value(saved, "images_dir", "images"))
+    board = args.board or config_value(saved, "board_name")
+    url_prefix = args.url_prefix or config_value(saved, "url_prefix")
+    if not board:
+        sys.exit("No board name. Run python scripts/setup.py or pass --board.")
+    if not url_prefix:
+        sys.exit("No image URL prefix. Run python scripts/setup.py or pass --url-prefix.")
 
     exts = tuple(e.strip().lower() for e in args.extensions.split(","))
+    if not images_dir.exists():
+        sys.exit(f"Image folder not found: {images_dir}. Create it and add PNG/JPG files.")
     images = sorted(
-        p for p in args.images_dir.iterdir()
+        p for p in images_dir.iterdir()
         if p.suffix.lower() in exts and p.is_file()
     )
     if not images:
-        sys.exit(f"No images found in {args.images_dir} with extensions {exts}")
+        sys.exit(f"No images found in {images_dir} with extensions {exts}")
 
     start_date = datetime.date.fromisoformat(args.start_date)
     api_key = load_api_key(args.api_key)
@@ -376,8 +306,8 @@ def main():
                   f"may under-perform in Pinterest search")
         rows.append({
             "Title": meta.get("title", path.stem)[:100],
-            "Media URL": args.url_prefix.rstrip("/") + "/" + path.name,
-            "Pinterest board": args.board,
+            "Media URL": url_prefix.rstrip("/") + "/" + path.name,
+            "Pinterest board": board,
             "Thumbnail": "",
             "Description": description,
             "Link": args.link,

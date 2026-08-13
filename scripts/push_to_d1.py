@@ -41,6 +41,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from app_config import config_value, load_config
+
 PRIMARY_CONFIG_PATH = Path.home() / ".config" / "cloudflare" / "config.json"
 CONFIG_PATHS = [PRIMARY_CONFIG_PATH]
 
@@ -128,24 +130,32 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--csv", required=True, type=Path,
-                         help="CSV produced by generate_pinterest_csv.py")
-    parser.add_argument("--board-id", required=True,
+    parser.add_argument("--csv", default=None, type=Path,
+                         help="CSV to queue. Default: pinterest_bulk_upload_with_links.csv")
+    parser.add_argument("--board-id", default=None,
                          help="Numeric Pinterest board ID (not the display name)")
     parser.add_argument("--account-id", default=None)
     parser.add_argument("--api-token", default=None)
     parser.add_argument("--database-id", default=None)
     args = parser.parse_args()
+    saved = load_config()
+    board_id = args.board_id or config_value(saved, "board_id")
+    if not board_id:
+        sys.exit("No board ID. Run python scripts/setup.py or pass --board-id.")
+    csv_path = args.csv
+    if csv_path is None:
+        matched = Path("pinterest_bulk_upload_with_links.csv")
+        csv_path = matched if matched.exists() else Path("pinterest_bulk_upload.csv")
 
     config = load_cf_config(args.account_id, args.api_token, args.database_id)
 
-    with open(args.csv, newline="") as f:
+    with open(csv_path, newline="") as f:
         rows = list(csv.DictReader(f))
 
     if not rows:
-        sys.exit(f"No rows found in {args.csv}")
+        sys.exit(f"No rows found in {csv_path}")
 
-    print(f"Pushing {len(rows)} rows from {args.csv} to D1 database "
+    print(f"Pushing {len(rows)} rows from {csv_path} to D1 database "
           f"{config['database_id']}...")
 
     inserted, failed = 0, 0
@@ -163,7 +173,7 @@ def main():
                 [
                     row["Title"],
                     row["Media URL"],
-                    args.board_id,
+                    board_id,
                     row.get("Description", ""),
                     row.get("Link", ""),
                     publish_at,
