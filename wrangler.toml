@@ -1,0 +1,24 @@
+name = "pinterest-pin-publisher"
+main = "src/worker.js"
+compatibility_date = "2026-07-01"
+
+# Runs every 15 minutes. Adjust to match how precise you want publish times
+# to be -- every 15 min means a pin scheduled for 09:00 could go out
+# anywhere between 09:00 and 09:14.
+[triggers]
+crons = ["*/15 * * * *"]
+
+# Create this once with: wrangler d1 create pin-publisher-db
+# Then paste the database_id it prints below.
+[[d1_databases]]
+binding = "DB"
+database_name = "pin-publisher-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# Secrets (never put these in this file -- set them with `wrangler secret put`):
+#   wrangler secret put PINTEREST_CLIENT_ID
+#   wrangler secret put PINTEREST_CLIENT_SECRET
+#   wrangler secret put PINTEREST_REFRESH_TOKEN
+#   wrangler secret put PINTEREST_ACCESS_TOKEN   (seeded once by scripts/oauth_setup.py, then
+#                                                  the Worker refreshes it automatically)

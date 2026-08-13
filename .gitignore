@@ -1,0 +1,30 @@
+# Pin images
+images/
+
+# Generated CSVs
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Environment and secrets
+.env
+.env.*
+.dev.vars
+
+# Cloudflare / Node
+node_modules/
+.wrangler/
+
+# OS
+.DS_Store
+Thumbs.db
