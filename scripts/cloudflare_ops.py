@@ -280,6 +280,7 @@ def reset_queue() -> dict:
         run_wrangler([
             "d1", "execute", DATABASE_NAME, "--remote", "--command",
             "UPDATE pin_queue SET status = 'pending', pinterest_pin_id = NULL, "
+            "pinterest_pin_url = NULL, "
             f"published_at = NULL, error_message = NULL WHERE id IN ({ids});",
         ])
     return {"cleared": len(cleared_ids), "reset": len(reset_ids)}

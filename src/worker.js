@@ -33,6 +33,10 @@ function pinterestApiBase(env) {
   return useSandbox(env) ? SANDBOX_API_BASE : PROD_API_BASE;
 }
 
+function pinUrl(pinId) {
+  return pinId ? `https://www.pinterest.com/pin/${pinId}/` : null;
+}
+
 // How many rows to publish per cron tick. Keep this modest -- Pinterest
 // rate-limits pin creation per app/user, and publishing everything at once
 // defeats the point of spreading posts across the day.
@@ -138,17 +142,19 @@ async function publishPin(env, accessToken, row) {
   const payload = await response.json().catch(() => ({}));
 
   if (response.ok) {
+    const publishedUrl = pinUrl(payload.id);
     await env.DB.prepare(
       `UPDATE pin_queue
-       SET status = 'published', pinterest_pin_id = ?, published_at = ?, error_message = NULL
+       SET status = 'published', pinterest_pin_id = ?, pinterest_pin_url = ?,
+           published_at = ?, error_message = NULL
        WHERE id = ?`
     )
-      .bind(payload.id || null, new Date().toISOString(), row.id)
+      .bind(payload.id || null, publishedUrl, new Date().toISOString(), row.id)
       .run();
     return {
       status: "published",
       pinterest_pin_id: payload.id,
-      pin_url: payload.id ? `https://www.pinterest.com/pin/${payload.id}/` : null,
+      pin_url: publishedUrl,
     };
   }
 

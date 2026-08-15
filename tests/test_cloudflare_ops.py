@@ -278,6 +278,7 @@ class ResetQueueTests(unittest.TestCase):
         self.assertIn("DELETE FROM pin_queue WHERE id IN (1, 2)", delete_call[-1])
         self.assertIn("WHERE id IN (3)", update_call[-1])
         self.assertIn("status = 'pending'", update_call[-1])
+        self.assertIn("pinterest_pin_url = NULL", update_call[-1])
 
     def test_empty_queue_issues_no_delete_or_update(self):
         calls = []
