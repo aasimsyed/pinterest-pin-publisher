@@ -117,6 +117,23 @@ python scripts/publish.py --dedupe-queue
 
 This keeps the oldest row for each title and removes the newer, more recent duplicates. It only touches pins still waiting to post (`pending`); add `--all-statuses` to also clean up already-published or failed rows.
 
+To wipe the queue and start over, clearing every pending/failed pin and putting already-published pins back to pending so they post again (handy after switching a board between sandbox and production):
+
+```bash
+python scripts/publish.py --reset-queue
+```
+
+It asks for confirmation first; add `-y` to skip that.
+
+To publish the next few pending pins right now instead of waiting for the Worker's next check (useful for testing, or for the Standard access demo video below):
+
+```bash
+python scripts/publish.py --run-now        # next 3 pins
+python scripts/publish.py --run-now 1      # just the next one
+```
+
+Each published pin's title and its live Pinterest link are printed as they go out.
+
 ---
 
 ## Applying for Pinterest Standard access
@@ -129,14 +146,14 @@ Pinterest's Trial/sandbox mode only shows pins to you, not the public (setup alr
 Both already exist in this app:
 
 1. Run setup (`Setup.command` / `Setup.bat`) and record the browser opening to Pinterest, you clicking **Allow**, and the terminal confirming success. Do not skip or speed up this part, Pinterest checks for it.
-2. Run `Publish Pins` once with a test image, then trigger the Worker immediately instead of waiting for its 15-minute cron:
+2. Run `Publish Pins` once with a test image, then publish it immediately instead of waiting for the 15-minute cron:
 
    ```bash
-   curl -H "Authorization: Bearer YOUR_MANUAL_TRIGGER_SECRET" https://pinterest-pin-publisher.<your-subdomain>.workers.dev/run
+   python scripts/publish.py --run-now 1
    ```
 
-   (Setup printed your `MANUAL_TRIGGER_SECRET` value, and your Worker's address is on its page at https://dash.cloudflare.com/ -> Workers & Pages.)
-3. Show the pin appear on your Pinterest board.
+   This prints the pin's live Pinterest link to the terminal.
+3. Open that link (or your board) on screen to show the pin.
 
 Sandbox pins are fine for this video, you don't need Standard access yet to record it.
 
@@ -146,7 +163,7 @@ Sandbox pins are fine for this video, you don't need Standard access yet to reco
 
 | What | Saved where |
 | --- | --- |
-| Anthropic key, website, image folder, board | `~/.config/pinterest-pin-publisher/config.json` (one file, readable only by your account) |
+| Anthropic key, website, image folder, board, Worker URL, manual-trigger secret | `~/.config/pinterest-pin-publisher/config.json` (one file, readable only by your account) |
 | Pinterest app credentials, refresh token | Cloudflare Worker secrets only, never written to this project folder |
 | Cloudflare login | Your existing `wrangler login` session, this app never stores a separate Cloudflare token |
 | Pin images | Your own private Cloudflare R2 bucket |

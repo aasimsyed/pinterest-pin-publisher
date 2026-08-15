@@ -16,22 +16,39 @@ will not push half-finished pins.
 
 Usage:
     python scripts/publish.py
-    python scripts/publish.py --dedupe-queue   # remove duplicate-titled
-                                                # rows already queued,
-                                                # keeping the oldest of
-                                                # each and deleting the
-                                                # more recent copies
+    python scripts/publish.py --dedupe-queue    # remove duplicate-titled
+                                                 # rows already queued,
+                                                 # keeping the oldest of
+                                                 # each and deleting the
+                                                 # more recent copies
+    python scripts/publish.py --reset-queue     # clear pending/failed rows
+                                                 # and reset published rows
+                                                 # back to pending
+    python scripts/publish.py --run-now         # publish the next 3 pending
+                                                 # pins right away instead of
+                                                 # waiting for their scheduled
+                                                 # time
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import secrets
 import subprocess
 import sys
 from pathlib import Path
 
-from cloudflare_ops import WranglerError, dedupe_queue
+from app_config import config_value, load_config, save_config
+from cloudflare_ops import (
+    PublishTriggerError,
+    WranglerError,
+    dedupe_queue,
+    reset_queue,
+    set_worker_secrets,
+    trigger_publish,
+    worker_url_from_wrangler,
+)
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 STEPS = [
@@ -75,6 +92,75 @@ def dedupe(all_statuses: bool) -> None:
         print(f"  - #{row['id']} ({row['status']}): \"{row['title']}\"")
 
 
+def reset(skip_confirm: bool) -> None:
+    print("\n=== Clearing the queue ===")
+    if not skip_confirm:
+        answer = input(
+            "This deletes every pending/failed pin and resets published pins "
+            "back to pending so they'll be posted again. Continue? [y/N] "
+        ).strip().lower()
+        if answer not in ("y", "yes"):
+            print("Cancelled, nothing was changed.")
+            return
+    try:
+        counts = reset_queue()
+    except WranglerError as e:
+        sys.exit(f"Could not clear the queue: {e}")
+    print(f"Deleted {counts['cleared']} pending/failed row(s) and reset "
+          f"{counts['reset']} published row(s) back to pending.")
+
+
+def resolve_trigger_credentials() -> tuple[str, str]:
+    """Return (worker_url, secret), recovering either from wrangler if
+    this computer's config was saved before those fields existed."""
+    config = load_config()
+    worker_url = config_value(config, "worker_url")
+    secret = config_value(config, "manual_trigger_secret")
+    updates = {}
+    if not worker_url:
+        try:
+            worker_url = worker_url_from_wrangler() or ""
+        except WranglerError as e:
+            sys.exit(f"Could not look up your Worker URL: {e}")
+        if worker_url:
+            updates["worker_url"] = worker_url
+    if not secret:
+        secret = secrets.token_urlsafe(24)
+        try:
+            set_worker_secrets({"MANUAL_TRIGGER_SECRET": secret})
+        except WranglerError as e:
+            sys.exit(f"Could not set the manual-trigger secret: {e}")
+        updates["manual_trigger_secret"] = secret
+        print("Saved a new manual-trigger secret (the previous one, if any, no longer works).")
+    if updates:
+        save_config(updates)
+    if not worker_url:
+        sys.exit(
+            "Could not find your Worker URL. Run scripts/setup.py again, "
+            "then retry --run-now."
+        )
+    return worker_url, secret
+
+
+def run_now(limit: int) -> None:
+    print(f"\n=== Publishing the next {limit} pending pin(s) now ===")
+    worker_url, secret = resolve_trigger_credentials()
+    try:
+        result = trigger_publish(worker_url, secret, limit=limit, force=True)
+    except PublishTriggerError as e:
+        sys.exit(f"Could not trigger the Worker: {e}")
+
+    published = [r for r in result.get("results", []) if r.get("status") == "published"]
+    failed = [r for r in result.get("results", []) if r.get("status") != "published"]
+    if not result.get("results"):
+        print("Nothing pending to publish.")
+        return
+    for row in published:
+        print(f"  Published \"{row['title']}\" -> {row.get('pin_url', '(no link returned)')}")
+    for row in failed:
+        print(f"  ! Failed \"{row['title']}\": {row.get('error', 'unknown error')}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -85,10 +171,29 @@ def main() -> None:
         "--all-statuses", action="store_true",
         help="With --dedupe-queue, also clean up published/failed rows, not just pending ones.",
     )
+    parser.add_argument(
+        "--reset-queue", action="store_true",
+        help="Delete pending/failed rows and reset published rows back to pending.",
+    )
+    parser.add_argument(
+        "--yes", "-y", action="store_true",
+        help="With --reset-queue, skip the confirmation prompt.",
+    )
+    parser.add_argument(
+        "--run-now", nargs="?", type=int, const=3, default=None, metavar="N",
+        help="Publish the next N pending pins immediately instead of waiting for their "
+             "scheduled time (default 3).",
+    )
     args = parser.parse_args()
 
     if args.dedupe_queue:
         dedupe(args.all_statuses)
+        return
+    if args.reset_queue:
+        reset(args.yes)
+        return
+    if args.run_now is not None:
+        run_now(args.run_now)
         return
 
     for label, script_name in STEPS:

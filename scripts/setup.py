@@ -173,7 +173,7 @@ def main() -> None:
         })
         reset_after_reauth()
         print("Deploying the publisher...")
-        deploy_worker()
+        worker_url = deploy_worker()
     except WranglerError as e:
         sys.exit(f"\nCloudflare setup failed: {e}")
 
@@ -183,12 +183,18 @@ def main() -> None:
         "board_name": board_name,
         "board_id": board_id,
         "pinterest_client_id": client_id,
+        "worker_url": worker_url,
+        "manual_trigger_secret": manual_trigger_secret,
     })
 
     print("\nAll set" + (" (sandbox mode -- pins are private until you have "
                           "Standard access)" if sandbox else "") + ". Each time you have new pins:")
     print("  1. Put the image files in the images folder")
     print("  2. Double-click \"Publish Pins\" (or run: python scripts/publish.py)")
+    if worker_url:
+        print(f"\nYour scheduler is live at {worker_url}")
+        print("Run pins immediately instead of waiting for their scheduled time with: "
+              "python scripts/publish.py --run-now")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,11 @@
 """Local settings for a non-technical publish workflow.
 
 Everything the app needs to remember on this computer lives in one file:
-Anthropic key, website, image folder, Pinterest board. Cloudflare has no
-entry here on purpose -- all Cloudflare access goes through `wrangler`,
-which keeps its own login session, so there is nothing Cloudflare-related
-for this app to store or lose track of.
+Anthropic key, website, image folder, Pinterest board. All Cloudflare
+*access* goes through `wrangler`, which keeps its own login session, so
+there is no Cloudflare account credential here -- the Worker URL and
+manual-trigger secret are cached below purely so `publish.py --run-now`
+doesn't require looking them up on the dashboard each time.
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ KEYS = (
     "board_name",
     "board_id",
     "pinterest_client_id",
+    "worker_url",
+    "manual_trigger_secret",
 )
 
 

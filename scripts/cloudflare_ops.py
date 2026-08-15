@@ -14,6 +14,8 @@ import os
 import re
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,11 +23,16 @@ DATABASE_NAME = "pin-publisher-db"
 BUCKET_NAME = "pin-publisher-images"
 R2_DEV_URL_RE = re.compile(r"https://[\w.-]+\.r2\.dev")
 D1_UUID_RE = re.compile(r'database_id\s*=\s*"([0-9a-f-]+)"')
+WORKER_URL_RE = re.compile(r"https://[\w.-]+\.workers\.dev")
 
 
 class WranglerError(RuntimeError):
     """Raised when a wrangler command fails, with a message meant for a
     non-technical user rather than a raw stack trace."""
+
+
+class PublishTriggerError(RuntimeError):
+    """Raised when calling the deployed Worker's /run endpoint fails."""
 
 
 def run_wrangler(args: list[str], input_text: str = "", check: bool = True) -> subprocess.CompletedProcess:
@@ -102,8 +109,44 @@ def reset_after_reauth() -> None:
     ])
 
 
-def deploy_worker() -> None:
-    run_wrangler(["deploy"])
+def deploy_worker() -> str | None:
+    """Deploy the Worker and return its workers.dev URL, so scripts can
+    call its /run endpoint later without the user having to look it up
+    on the Cloudflare dashboard. Returns None if the URL couldn't be
+    found in wrangler's output (for example, a workers.dev subdomain
+    that isn't registered yet)."""
+    result = run_wrangler(["deploy"])
+    match = WORKER_URL_RE.search(result.stdout)
+    return match.group(0) if match else None
+
+
+def worker_url_from_wrangler() -> str | None:
+    """Read the live workers.dev URL without a full redeploy, so --run-now
+    still works on a machine whose local config predates that field."""
+    listed = run_wrangler(["deployments", "list"], check=False)
+    match = WORKER_URL_RE.search(listed.stdout)
+    return match.group(0) if match else None
+
+
+def trigger_publish(worker_url: str, secret: str, limit: int, force: bool = True) -> dict:
+    """Call the deployed Worker's /run endpoint directly, so pins can be
+    posted right now instead of waiting for the next cron tick."""
+    query = f"?force={'true' if force else 'false'}&limit={limit}"
+    request = urllib.request.Request(
+        worker_url.rstrip("/") + "/run" + query,
+        headers={
+            "Authorization": f"Bearer {secret}",
+            "User-Agent": "pinterest-pin-publisher/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        raise PublishTriggerError(f"Worker returned {e.code}: {body[:300]}") from e
+    except urllib.error.URLError as e:
+        raise PublishTriggerError(f"Could not reach the Worker at {worker_url}: {e.reason}") from e
 
 
 def set_worker_secrets(secrets: dict[str, str]) -> None:
@@ -208,6 +251,38 @@ def dedupe_queue(pending_only: bool = True) -> list[dict]:
             f"DELETE FROM pin_queue WHERE id IN ({ids});",
         ])
     return to_remove
+
+
+def reset_queue() -> dict:
+    """Wipe the queue for a fresh start: pending/failed rows are deleted
+    outright, and published rows are reset back to pending (clearing
+    their old Pinterest pin id and timestamps) so they'll be posted
+    again -- useful after switching a board between sandbox and
+    production, where old "published" pins were never actually public."""
+    result = run_wrangler([
+        "d1", "execute", DATABASE_NAME, "--remote", "--command",
+        "SELECT id, status FROM pin_queue;", "--json",
+    ])
+    payload = json.loads(result.stdout or "[]")
+    rows = payload[0].get("results", []) if payload else []
+
+    cleared_ids = [row["id"] for row in rows if row["status"] in ("pending", "failed")]
+    reset_ids = [row["id"] for row in rows if row["status"] == "published"]
+
+    if cleared_ids:
+        ids = ", ".join(str(i) for i in cleared_ids)
+        run_wrangler([
+            "d1", "execute", DATABASE_NAME, "--remote", "--command",
+            f"DELETE FROM pin_queue WHERE id IN ({ids});",
+        ])
+    if reset_ids:
+        ids = ", ".join(str(i) for i in reset_ids)
+        run_wrangler([
+            "d1", "execute", DATABASE_NAME, "--remote", "--command",
+            "UPDATE pin_queue SET status = 'pending', pinterest_pin_id = NULL, "
+            f"published_at = NULL, error_message = NULL WHERE id IN ({ids});",
+        ])
+    return {"cleared": len(cleared_ids), "reset": len(reset_ids)}
 
 
 def insert_pin_rows(rows: list[dict]) -> None:

@@ -38,6 +38,10 @@ function pinterestApiBase(env) {
 // defeats the point of spreading posts across the day.
 const BATCH_SIZE = 5;
 
+// Upper bound for the manual ?limit= override, so a mistyped value can't
+// blow through Pinterest's rate limit in one request.
+const MAX_MANUAL_LIMIT = 20;
+
 // Refresh the access token if it expires within this many seconds, so we
 // never try to use a token that dies mid-request.
 const TOKEN_REFRESH_BUFFER_SECONDS = 300;
@@ -49,6 +53,9 @@ export default {
 
   // Optional manual trigger for testing locally with `wrangler dev`, e.g.:
   //   curl -H "Authorization: Bearer $MANUAL_TRIGGER_SECRET" https://.../run
+  // Add ?force=true&limit=3 to publish the next N pending pins right away
+  // instead of waiting for their publish_at time (scripts/publish.py
+  // --run-now uses this).
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname !== "/run") {
@@ -58,25 +65,36 @@ export default {
     if (auth !== `Bearer ${env.MANUAL_TRIGGER_SECRET}`) {
       return new Response("Unauthorized", { status: 401 });
     }
-    const result = await runPublishCycle(env);
+    const force = url.searchParams.get("force") === "true";
+    const limit = Math.min(parseInt(url.searchParams.get("limit"), 10) || BATCH_SIZE, MAX_MANUAL_LIMIT);
+    const result = await runPublishCycle(env, { force, limit });
     return new Response(JSON.stringify(result, null, 2), {
       headers: { "content-type": "application/json" },
     });
   },
 };
 
-async function runPublishCycle(env) {
+async function runPublishCycle(env, { force = false, limit = BATCH_SIZE } = {}) {
   const accessToken = await getValidAccessToken(env);
   const nowIso = new Date().toISOString();
 
-  const due = await env.DB.prepare(
-    `SELECT * FROM pin_queue
-     WHERE status = 'pending' AND publish_at <= ?
-     ORDER BY publish_at ASC
-     LIMIT ?`
-  )
-    .bind(nowIso, BATCH_SIZE)
-    .all();
+  const due = force
+    ? await env.DB.prepare(
+        `SELECT * FROM pin_queue
+         WHERE status = 'pending'
+         ORDER BY publish_at ASC
+         LIMIT ?`
+      )
+        .bind(limit)
+        .all()
+    : await env.DB.prepare(
+        `SELECT * FROM pin_queue
+         WHERE status = 'pending' AND publish_at <= ?
+         ORDER BY publish_at ASC
+         LIMIT ?`
+      )
+        .bind(nowIso, limit)
+        .all();
 
   const results = [];
   for (const row of due.results) {
@@ -127,7 +145,11 @@ async function publishPin(env, accessToken, row) {
     )
       .bind(payload.id || null, new Date().toISOString(), row.id)
       .run();
-    return { status: "published", pinterest_pin_id: payload.id };
+    return {
+      status: "published",
+      pinterest_pin_id: payload.id,
+      pin_url: payload.id ? `https://www.pinterest.com/pin/${payload.id}/` : null,
+    };
   }
 
   const errorMessage = JSON.stringify(payload).slice(0, 500);
