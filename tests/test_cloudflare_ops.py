@@ -149,5 +149,67 @@ class ExistingTitlesTests(unittest.TestCase):
             self.assertEqual(cloudflare_ops.existing_titles(), set())
 
 
+class DedupeQueueTests(unittest.TestCase):
+    def test_keeps_oldest_row_and_deletes_newer_duplicates(self):
+        calls = []
+
+        def fake_run_wrangler(args, input_text="", check=True):
+            calls.append(args)
+            if "SELECT" in args[-2]:
+                return subprocess.CompletedProcess(
+                    args, 0,
+                    stdout=(
+                        '[{"results": ['
+                        '{"id": 1, "title": "Chili Recipe", "status": "pending"},'
+                        '{"id": 2, "title": "Other Pin", "status": "pending"},'
+                        '{"id": 3, "title": "chili recipe", "status": "pending"},'
+                        '{"id": 4, "title": "Chili Recipe ", "status": "pending"}'
+                        '], "success": true}]'
+                    ),
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            removed = cloudflare_ops.dedupe_queue()
+
+        self.assertEqual([row["id"] for row in removed], [3, 4])
+        delete_call = calls[-1]
+        self.assertIn("DELETE FROM pin_queue WHERE id IN (3, 4)", delete_call[-1])
+
+    def test_no_duplicates_deletes_nothing(self):
+        calls = []
+
+        def fake_run_wrangler(args, input_text="", check=True):
+            calls.append(args)
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout='[{"results": [{"id": 1, "title": "Unique", "status": "pending"}], "success": true}]',
+                stderr="",
+            )
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            removed = cloudflare_ops.dedupe_queue()
+
+        self.assertEqual(removed, [])
+        self.assertEqual(len(calls), 1, "should not issue a DELETE when nothing is duplicated")
+
+    def test_pending_only_filters_query_by_status(self):
+        def fake_run_wrangler(args, input_text="", check=True):
+            self.assertIn("WHERE status = 'pending'", args[-2])
+            return subprocess.CompletedProcess(args, 0, stdout='[{"results": [], "success": true}]', stderr="")
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            cloudflare_ops.dedupe_queue(pending_only=True)
+
+    def test_all_statuses_omits_status_filter(self):
+        def fake_run_wrangler(args, input_text="", check=True):
+            self.assertNotIn("WHERE", args[-2])
+            return subprocess.CompletedProcess(args, 0, stdout='[{"results": [], "success": true}]', stderr="")
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            cloudflare_ops.dedupe_queue(pending_only=False)
+
+
 if __name__ == "__main__":
     unittest.main()

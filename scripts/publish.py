@@ -16,14 +16,22 @@ will not push half-finished pins.
 
 Usage:
     python scripts/publish.py
+    python scripts/publish.py --dedupe-queue   # remove duplicate-titled
+                                                # rows already queued,
+                                                # keeping the oldest of
+                                                # each and deleting the
+                                                # more recent copies
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 import subprocess
 import sys
 from pathlib import Path
+
+from cloudflare_ops import WranglerError, dedupe_queue
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 STEPS = [
@@ -53,7 +61,36 @@ def summarize() -> None:
           f"(the Worker checks every 15 minutes).")
 
 
+def dedupe(all_statuses: bool) -> None:
+    print("\n=== Cleaning up duplicate titles already in the queue ===")
+    try:
+        removed = dedupe_queue(pending_only=not all_statuses)
+    except WranglerError as e:
+        sys.exit(f"Could not clean up the queue: {e}")
+    if not removed:
+        print("No duplicate titles found.")
+        return
+    print(f"Removed {len(removed)} duplicate row(s), keeping the oldest of each title:")
+    for row in removed:
+        print(f"  - #{row['id']} ({row['status']}): \"{row['title']}\"")
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dedupe-queue", action="store_true",
+        help="Remove duplicate-titled rows already in the queue instead of publishing new pins.",
+    )
+    parser.add_argument(
+        "--all-statuses", action="store_true",
+        help="With --dedupe-queue, also clean up published/failed rows, not just pending ones.",
+    )
+    args = parser.parse_args()
+
+    if args.dedupe_queue:
+        dedupe(args.all_statuses)
+        return
+
     for label, script_name in STEPS:
         run_step(label, script_name)
     summarize()

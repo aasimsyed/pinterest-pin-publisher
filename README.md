@@ -109,6 +109,14 @@ python scripts/push_to_d1.py --board-id YOUR_BOARD_ID
 
 Open `pinterest_bulk_upload_with_links.csv` in Excel if you want to glance at titles and links before pushing.
 
+Every run already checks new titles against everything already queued and rewords any exact match, but if you ever end up with duplicate-titled rows in the queue (for example from before this check existed), clean them up with:
+
+```bash
+python scripts/publish.py --dedupe-queue
+```
+
+This keeps the oldest row for each title and removes the newer, more recent duplicates. It only touches pins still waiting to post (`pending`); add `--all-statuses` to also clean up already-published or failed rows.
+
 ---
 
 ## Applying for Pinterest Standard access

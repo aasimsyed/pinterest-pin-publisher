@@ -179,6 +179,37 @@ def existing_titles() -> set[str]:
     return {row["title"].strip().lower() for row in rows if row.get("title")}
 
 
+def dedupe_queue(pending_only: bool = True) -> list[dict]:
+    """Remove duplicate-titled rows already sitting in pin_queue, keeping
+    the oldest row for each title and deleting the more recent ones.
+    Only pending rows are touched by default, since published/failed
+    rows are history rather than upcoming work."""
+    where = " WHERE status = 'pending'" if pending_only else ""
+    result = run_wrangler([
+        "d1", "execute", DATABASE_NAME, "--remote", "--command",
+        f"SELECT id, title, status FROM pin_queue{where} ORDER BY id ASC;", "--json",
+    ])
+    payload = json.loads(result.stdout or "[]")
+    rows = payload[0].get("results", []) if payload else []
+
+    seen: set[str] = set()
+    to_remove: list[dict] = []
+    for row in rows:
+        key = row["title"].strip().lower()
+        if key in seen:
+            to_remove.append(row)
+        else:
+            seen.add(key)
+
+    if to_remove:
+        ids = ", ".join(str(row["id"]) for row in to_remove)
+        run_wrangler([
+            "d1", "execute", DATABASE_NAME, "--remote", "--command",
+            f"DELETE FROM pin_queue WHERE id IN ({ids});",
+        ])
+    return to_remove
+
+
 def insert_pin_rows(rows: list[dict]) -> None:
     """Insert every row in a single wrangler call instead of one per row."""
     statements = []
