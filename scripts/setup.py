@@ -57,9 +57,9 @@ def write_wrangler_database_id(database_id: str) -> None:
     WRANGLER_TOML.write_text(text[:start] + database_id + text[end:])
 
 
-def pick_board(access_token: str, saved_id: str) -> tuple[str, str]:
+def pick_board(access_token: str, saved_id: str, sandbox: bool = False) -> tuple[str, str]:
     try:
-        boards = list_boards(access_token)
+        boards = list_boards(access_token, sandbox=sandbox)
     except urllib.error.HTTPError as e:
         print(f"Could not list boards automatically ({e.code}).")
         boards = []
@@ -81,7 +81,12 @@ def pick_board(access_token: str, saved_id: str) -> tuple[str, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
+    parser.add_argument(
+        "--sandbox",
+        action="store_true",
+        help="Authorize against Pinterest sandbox (Trial can create pins there)",
+    )
+    args = parser.parse_args()
 
     print("Pinterest Pin Publisher setup")
     print("You will paste a few keys. They stay on this computer.\n")
@@ -128,14 +133,18 @@ def main() -> None:
 
     print("\nA browser window will open. Click Allow, then come back here.\n")
     code = get_authorization_code(client_id)
-    tokens = exchange_code_for_tokens(client_id, client_secret, code)
+    tokens = exchange_code_for_tokens(
+        client_id, client_secret, code, sandbox=args.sandbox
+    )
     refresh_token = tokens.get("refresh_token") or ""
     access_token = tokens.get("access_token") or ""
     if not refresh_token:
         sys.exit("Pinterest did not return a refresh token. Check the app scopes.")
 
     print("\n6) Which board should pins go on?")
-    board_name, board_id = pick_board(access_token, config_value(saved, "board_id"))
+    board_name, board_id = pick_board(
+        access_token, config_value(saved, "board_id"), sandbox=args.sandbox
+    )
     if not board_name:
         board_name = ask("Board name", config_value(saved, "board_name"))
     if not board_id:
@@ -154,8 +163,16 @@ def main() -> None:
         "site_url": site_url,
         "images_dir": images_dir,
         "url_prefix": url_prefix,
-        "board_name": board_name,
-        "board_id": board_id,
+        "board_name": (
+            (config_value(saved, "board_name") or board_name)
+            if args.sandbox
+            else board_name
+        ),
+        "board_id": (
+            (config_value(saved, "board_id") or board_id)
+            if args.sandbox
+            else board_id
+        ),
         "pinterest_client_id": client_id,
     })
 
@@ -167,6 +184,10 @@ def main() -> None:
     print("    paste: your App secret")
     print("  wrangler secret put PINTEREST_REFRESH_TOKEN")
     print(f"    paste: {refresh_token}")
+    if args.sandbox:
+        print("\nSandbox mode: in wrangler.toml set PINTEREST_SANDBOX = \"true\"")
+        print(f"and PINTEREST_BOARD_ID = \"{board_id}\" then wrangler deploy.")
+        print("Clear oauth_tokens after you switch environments.")
     print("\nThen finish the README section: Deploy the publisher (one time).")
     print("Each time you have new pins:\n")
     print("  python scripts/generate_pinterest_csv.py")
