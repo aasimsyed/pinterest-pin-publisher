@@ -44,7 +44,7 @@ from anthropic.types import (
 
 from anthropic_auth import load_api_key
 from app_config import config_value, load_config
-from cloudflare_ops import WranglerError, ensure_image_bucket, upload_image
+from cloudflare_ops import WranglerError, ensure_image_bucket, existing_titles, upload_image
 
 # Pinterest bulk-upload column order (see Pinterest's help doc)
 FIELDNAMES = [
@@ -165,20 +165,20 @@ def analyze_image(client: anthropic.Anthropic, path: Path) -> dict:
 
 def rephrase_title(client: anthropic.Anthropic, title: str, used_titles: set[str]) -> str:
     """Ask Claude for an alternate phrasing of a title that collides with
-    another title already in this batch. Pinterest's bulk CSV uploader
-    rejects exact duplicate titles (even though duplicates are allowed when
-    scheduling manually through the UI), so this keeps the same keyword and
-    meaning while wording it differently enough to pass validation."""
+    another title already in this batch or already queued/published.
+    Pinterest's bulk CSV uploader rejects exact duplicate titles (even
+    though duplicates are allowed when scheduling manually through the
+    UI), so this keeps the same keyword and meaning while wording it
+    differently enough to pass validation."""
     used_list = "\n".join(f"- {t}" for t in sorted(used_titles))
-    prompt = f"""This Pinterest pin title collides with another title already \
-used in the same bulk-upload batch, which Pinterest's CSV uploader will \
-reject as a duplicate (manual scheduling allows duplicates, but bulk CSV \
-upload does not):
+    prompt = f"""This Pinterest pin title collides with another title that's \
+already queued or in this same bulk-upload batch, which Pinterest's CSV \
+uploader will reject as a duplicate (manual scheduling allows duplicates, \
+but bulk CSV upload does not):
 
 "{title}"
 
-Titles already used in this batch -- the new title must not exactly match \
-any of these:
+Titles already in use -- the new title must not exactly match any of these:
 {used_list}
 
 Write ONE alternate phrasing that:
@@ -210,10 +210,16 @@ Respond with ONLY a JSON object: {{"title": "..."}}"""
         return title  # fall back to original if parsing fails
 
 
-def dedupe_titles(client: anthropic.Anthropic, rows: list[dict], max_attempts: int = 3) -> list[dict]:
-    """Reword any titles that exactly duplicate an earlier title in the batch
-    (case-insensitive), since Pinterest's bulk CSV upload rejects duplicates."""
-    used_titles: set[str] = set()
+def dedupe_titles(
+    client: anthropic.Anthropic,
+    rows: list[dict],
+    already_queued: set[str] | None = None,
+    max_attempts: int = 3,
+) -> list[dict]:
+    """Reword any titles that exactly duplicate (case-insensitive) an
+    earlier title in this batch, or one already sitting in pin_queue,
+    since Pinterest's bulk CSV upload rejects duplicates."""
+    used_titles: set[str] = set(already_queued or ())
     for row in rows:
         title = row["Title"]
         key = title.strip().lower()
@@ -324,7 +330,13 @@ def main():
     if not args.allow_duplicate_titles:
         print("\nChecking for duplicate titles (Pinterest's bulk CSV upload "
               "rejects these)...")
-        rows = dedupe_titles(client, rows)
+        try:
+            already_queued = existing_titles()
+        except WranglerError as e:
+            print(f"  ! Could not check already-queued titles ({e}); only "
+                  f"checking this batch.")
+            already_queued = set()
+        rows = dedupe_titles(client, rows, already_queued)
 
     schedule = list(build_schedule(len(rows), start_date, args.posts_per_day))
     for row, publish_date in zip(rows, schedule):

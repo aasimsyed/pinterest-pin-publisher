@@ -163,6 +163,22 @@ def _sql_quote(value) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def existing_titles() -> set[str]:
+    """Return every title already in the queue (any status), so a new
+    batch never gives a pin the same title as one already queued or
+    published -- Pinterest's bulk CSV upload rejects exact duplicates,
+    and repeated titles hurt search ranking anyway."""
+    result = run_wrangler([
+        "d1", "execute", DATABASE_NAME, "--remote", "--command",
+        "SELECT title FROM pin_queue;", "--json",
+    ])
+    payload = json.loads(result.stdout or "[]")
+    if not payload:
+        return set()
+    rows = payload[0].get("results", [])
+    return {row["title"].strip().lower() for row in rows if row.get("title")}
+
+
 def insert_pin_rows(rows: list[dict]) -> None:
     """Insert every row in a single wrangler call instead of one per row."""
     statements = []

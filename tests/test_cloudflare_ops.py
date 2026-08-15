@@ -125,5 +125,29 @@ class EnsureImageBucketTests(unittest.TestCase):
         self.assertFalse(any(a[:4] == ["r2", "bucket", "dev-url", "enable"] for a in calls))
 
 
+class ExistingTitlesTests(unittest.TestCase):
+    def test_returns_lowercased_titles_from_query_results(self):
+        def fake_run_wrangler(args, input_text="", check=True):
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout='[{"results": [{"title": "Mom'"'"'s Chili"}, {"title": "Second Pin"}], "success": true}]',
+                stderr="",
+            )
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            titles = cloudflare_ops.existing_titles()
+
+        self.assertEqual(titles, {"mom's chili", "second pin"})
+
+    def test_empty_queue_returns_empty_set(self):
+        def fake_run_wrangler(args, input_text="", check=True):
+            return subprocess.CompletedProcess(
+                args, 0, stdout='[{"results": [], "success": true}]', stderr="",
+            )
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            self.assertEqual(cloudflare_ops.existing_titles(), set())
+
+
 if __name__ == "__main__":
     unittest.main()
