@@ -285,6 +285,25 @@ def reset_queue() -> dict:
     return {"cleared": len(cleared_ids), "reset": len(reset_ids)}
 
 
+def clear_queue() -> int:
+    """Delete every row in pin_queue, any status. This is a full wipe,
+    unlike reset_queue which keeps published rows and puts them back
+    to pending."""
+    counted = run_wrangler([
+        "d1", "execute", DATABASE_NAME, "--remote", "--command",
+        "SELECT COUNT(*) AS n FROM pin_queue;", "--json",
+    ])
+    payload = json.loads(counted.stdout or "[]")
+    rows = payload[0].get("results", []) if payload else []
+    n = int(rows[0]["n"]) if rows else 0
+    if n:
+        run_wrangler([
+            "d1", "execute", DATABASE_NAME, "--remote", "--command",
+            "DELETE FROM pin_queue;",
+        ])
+    return n
+
+
 def insert_pin_rows(rows: list[dict]) -> None:
     """Insert every row in a single wrangler call instead of one per row."""
     statements = []

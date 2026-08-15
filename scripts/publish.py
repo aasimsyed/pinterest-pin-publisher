@@ -21,9 +21,10 @@ Usage:
                                                  # keeping the oldest of
                                                  # each and deleting the
                                                  # more recent copies
-    python scripts/publish.py --reset-queue     # clear pending/failed rows
+    python scripts/publish.py --reset-queue     # delete pending/failed rows
                                                  # and reset published rows
                                                  # back to pending
+    python scripts/publish.py --clear-queue     # delete every row, any status
     python scripts/publish.py --run-now         # publish the next 3 pending
                                                  # pins right away instead of
                                                  # waiting for their scheduled
@@ -43,6 +44,7 @@ from app_config import config_value, load_config, save_config
 from cloudflare_ops import (
     PublishTriggerError,
     WranglerError,
+    clear_queue,
     dedupe_queue,
     reset_queue,
     set_worker_secrets,
@@ -93,7 +95,7 @@ def dedupe(all_statuses: bool) -> None:
 
 
 def reset(skip_confirm: bool) -> None:
-    print("\n=== Clearing the queue ===")
+    print("\n=== Resetting the queue ===")
     if not skip_confirm:
         answer = input(
             "This deletes every pending/failed pin and resets published pins "
@@ -105,9 +107,26 @@ def reset(skip_confirm: bool) -> None:
     try:
         counts = reset_queue()
     except WranglerError as e:
-        sys.exit(f"Could not clear the queue: {e}")
+        sys.exit(f"Could not reset the queue: {e}")
     print(f"Deleted {counts['cleared']} pending/failed row(s) and reset "
           f"{counts['reset']} published row(s) back to pending.")
+
+
+def clear(skip_confirm: bool) -> None:
+    print("\n=== Clearing the queue ===")
+    if not skip_confirm:
+        answer = input(
+            "This permanently deletes every pin in the queue, including "
+            "already-published ones. Continue? [y/N] "
+        ).strip().lower()
+        if answer not in ("y", "yes"):
+            print("Cancelled, nothing was changed.")
+            return
+    try:
+        n = clear_queue()
+    except WranglerError as e:
+        sys.exit(f"Could not clear the queue: {e}")
+    print(f"Deleted {n} row(s). The queue is empty.")
 
 
 def resolve_trigger_credentials() -> tuple[str, str]:
@@ -176,8 +195,12 @@ def main() -> None:
         help="Delete pending/failed rows and reset published rows back to pending.",
     )
     parser.add_argument(
+        "--clear-queue", action="store_true",
+        help="Delete every row in the queue, including published ones.",
+    )
+    parser.add_argument(
         "--yes", "-y", action="store_true",
-        help="With --reset-queue, skip the confirmation prompt.",
+        help="With --reset-queue or --clear-queue, skip the confirmation prompt.",
     )
     parser.add_argument(
         "--run-now", nargs="?", type=int, const=3, default=None, metavar="N",
@@ -191,6 +214,9 @@ def main() -> None:
         return
     if args.reset_queue:
         reset(args.yes)
+        return
+    if args.clear_queue:
+        clear(args.yes)
         return
     if args.run_now is not None:
         run_now(args.run_now)

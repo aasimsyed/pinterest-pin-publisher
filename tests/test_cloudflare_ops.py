@@ -293,6 +293,40 @@ class ResetQueueTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class ClearQueueTests(unittest.TestCase):
+    def test_deletes_every_row_and_returns_count(self):
+        calls = []
+
+        def fake_run_wrangler(args, input_text="", check=True):
+            calls.append(args)
+            if args[-1] == "--json":
+                return subprocess.CompletedProcess(
+                    args, 0, stdout='[{"results": [{"n": 4}], "success": true}]', stderr="",
+                )
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            n = cloudflare_ops.clear_queue()
+
+        self.assertEqual(n, 4)
+        self.assertIn("DELETE FROM pin_queue;", calls[-1][-1])
+
+    def test_empty_queue_issues_no_delete(self):
+        calls = []
+
+        def fake_run_wrangler(args, input_text="", check=True):
+            calls.append(args)
+            return subprocess.CompletedProcess(
+                args, 0, stdout='[{"results": [{"n": 0}], "success": true}]', stderr="",
+            )
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            n = cloudflare_ops.clear_queue()
+
+        self.assertEqual(n, 0)
+        self.assertEqual(len(calls), 1)
+
+
 class WorkerUrlFromWranglerTests(unittest.TestCase):
     def test_extracts_url_from_deployments_list(self):
         def fake_run_wrangler(args, input_text="", check=True):
