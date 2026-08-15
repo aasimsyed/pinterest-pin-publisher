@@ -6,11 +6,11 @@ app_config.py) instead of a separate ~/.config/anthropic/ folder.
 
 from __future__ import annotations
 
-import getpass
 import os
 import sys
 
 from app_config import CONFIG_PATH, config_value, load_config, save_config
+from masked_input import read_secret
 
 
 def save_api_key(key: str) -> None:
@@ -24,7 +24,7 @@ def first_run_setup() -> str:
     print("Get a key at: https://console.anthropic.com/settings/keys\n")
 
     while True:
-        key = getpass.getpass("Paste your Anthropic API key (input hidden): ").strip()
+        key = read_secret("Paste your Anthropic API key: ")
         if key:
             break
         print("That was empty -- try again.")

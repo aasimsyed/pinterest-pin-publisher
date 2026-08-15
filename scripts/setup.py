@@ -10,7 +10,6 @@ you, so the other scripts run with almost no flags.
 from __future__ import annotations
 
 import argparse
-import getpass
 import secrets
 import subprocess
 import sys
@@ -19,6 +18,7 @@ from pathlib import Path
 
 from anthropic_auth import load_api_key
 from app_config import config_value, load_config, save_config
+from masked_input import read_secret
 from cloudflare_ops import (
     WranglerError,
     apply_migrations,
@@ -45,7 +45,7 @@ def ask(label: str, default: str = "", hidden: bool = False) -> str:
     suffix = f" [{default}]" if default else ""
     prompt = f"{label}{suffix}: "
     if hidden:
-        value = getpass.getpass(prompt).strip()
+        value = read_secret(prompt)
     else:
         value = input(prompt).strip()
     return value or default

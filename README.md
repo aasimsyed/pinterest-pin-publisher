@@ -139,11 +139,11 @@ It installs a couple of Python packages first. That can take a minute. Wait.
 
 Then it asks questions. After each one, press **Enter**.
 
-1. **Anthropic key.** Paste the `sk-ant-` key from your notepad. You may not see the letters as you paste. That is normal. Press Enter.
+1. **Anthropic key.** Paste the `sk-ant-` key from your notepad. You will see stars (`****`) instead of the real letters. Press Enter.
 2. **Website URL.** Type your site the way people type it in a browser, for example `https://yourfrugalmom.com`. No slash at the end.
 3. **Image folder.** Press Enter to use the default (`images`). Setup will create that folder if it is missing.
 4. **Pinterest App ID.** Paste the App ID from your notepad.
-5. **Pinterest App secret.** Paste the App secret. You may not see the letters. Press Enter.
+5. **Pinterest App secret.** Paste the App secret. You will see stars (`****`) instead of the real letters. Press Enter.
 6. **Do you already have Pinterest Standard access? (y/n)**  
    If you are not sure, type `n` and press Enter. That is the safe answer for a new app.
 
