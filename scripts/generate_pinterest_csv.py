@@ -2,17 +2,18 @@
 """
 generate_pinterest_csv.py
 
-Reads a folder of Pinterest pin images, uses Claude (vision) to read the
-title text baked into each graphic and write an SEO-optimized description
-and keyword list, then assembles everything into a Pinterest bulk-upload CSV.
+Reads a folder of Pinterest pin images, uploads each one to Cloudflare R2
+so Pinterest has a public URL to fetch it from, uses Claude (vision) to
+read the title text baked into each graphic and write an SEO-optimized
+description and keyword list, then assembles everything into a Pinterest
+bulk-upload CSV.
 
 API key resolution order:
     1. --api-key flag
     2. ANTHROPIC_API_KEY environment variable
-    3. ~/.config/anthropic/config.json  (or legacy ~/.anthropic/config.json)
-       containing: {"api_key": "sk-ant-..."}
-    4. If none found and running interactively, prompts once and saves the
-       key to ~/.config/anthropic/config.json (chmod 600) for next time.
+    3. The saved config (~/.config/pinterest-pin-publisher/config.json)
+    4. If none found and running interactively, prompts once and saves it
+       there (chmod 600) for next time.
 
 Usage:
     python scripts/generate_pinterest_csv.py
@@ -43,6 +44,7 @@ from anthropic.types import (
 
 from anthropic_auth import load_api_key
 from app_config import config_value, load_config
+from cloudflare_ops import WranglerError, ensure_image_bucket, upload_image
 
 # Pinterest bulk-upload column order (see Pinterest's help doc)
 FIELDNAMES = [
@@ -250,8 +252,6 @@ def main():
                          help="Folder of pin images. Default: images/ or setup value.")
     parser.add_argument("--board", default=None,
                          help="Pinterest board name. Default: value from setup.")
-    parser.add_argument("--url-prefix", default=None,
-                         help="Public URL folder for those images. Default: setup value.")
     parser.add_argument("--link", default="",
                          help="Destination URL to fill into the Link column for every pin")
     parser.add_argument("--posts-per-day", type=int, default=3)
@@ -262,10 +262,9 @@ def main():
                          help="Comma-separated list of image extensions to include")
     parser.add_argument("--api-key", default=None,
                          help="Anthropic API key. If omitted, falls back to the "
-                              "ANTHROPIC_API_KEY env var, then "
-                              "~/.config/anthropic/config.json -- if none of those "
-                              "exist you'll be prompted once and it'll be saved "
-                              "for next time")
+                              "ANTHROPIC_API_KEY env var, then the saved config "
+                              "-- if neither exists you'll be prompted once and "
+                              "it'll be saved for next time")
     parser.add_argument("--allow-duplicate-titles", action="store_true",
                          help="Skip the automatic title-dedup pass. Only use this "
                               "if you plan to schedule the rows manually in "
@@ -275,11 +274,8 @@ def main():
     saved = load_config()
     images_dir = args.images_dir or Path(config_value(saved, "images_dir", "images"))
     board = args.board or config_value(saved, "board_name")
-    url_prefix = args.url_prefix or config_value(saved, "url_prefix")
     if not board:
         sys.exit("No board name. Run python scripts/setup.py or pass --board.")
-    if not url_prefix:
-        sys.exit("No image URL prefix. Run python scripts/setup.py or pass --url-prefix.")
 
     exts = tuple(e.strip().lower() for e in args.extensions.split(","))
     if not images_dir.exists():
@@ -295,10 +291,20 @@ def main():
     api_key = load_api_key(args.api_key)
     client = anthropic.Anthropic(api_key=api_key)
 
+    print("Making sure your pin images have a public web address...")
+    try:
+        public_base_url = ensure_image_bucket()
+    except WranglerError as e:
+        sys.exit(f"Could not set up image hosting: {e}")
+
     rows = []
-    print(f"Analyzing {len(images)} images with Claude...")
+    print(f"\nUploading and analyzing {len(images)} images with Claude...")
     for i, path in enumerate(images, 1):
         print(f"[{i}/{len(images)}] {path.name}")
+        try:
+            media_url = upload_image(path, public_base_url)
+        except WranglerError as e:
+            sys.exit(f"Could not upload {path.name}: {e}")
         meta = analyze_image(client, path)
         description = meta.get("description", "")[:500]
         if len(description) < 150:
@@ -306,7 +312,7 @@ def main():
                   f"may under-perform in Pinterest search")
         rows.append({
             "Title": meta.get("title", path.stem)[:100],
-            "Media URL": url_prefix.rstrip("/") + "/" + path.name,
+            "Media URL": media_url,
             "Pinterest board": board,
             "Thumbnail": "",
             "Description": description,

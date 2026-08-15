@@ -13,11 +13,18 @@
  * immediately on request. This Worker is what turns "publish immediately"
  * into "publish on schedule": it only calls the API once a row's
  * publish_at time has actually arrived.
+ *
+ * Set PINTEREST_SANDBOX = "true" in wrangler.toml [vars] to post against
+ * Pinterest's sandbox instead of production (needed for Trial-access
+ * apps, see the README). scripts/setup.py manages this for you.
  */
 
 const PROD_API_BASE = "https://api.pinterest.com/v5";
 const SANDBOX_API_BASE = "https://api-sandbox.pinterest.com/v5";
 
+// Trial Pinterest apps can only create pins in Pinterest's private sandbox
+// until approved for Standard access. Toggle via PINTEREST_SANDBOX in
+// wrangler.toml [vars] (scripts/setup.py manages this for you).
 function useSandbox(env) {
   return String(env.PINTEREST_SANDBOX || "").toLowerCase() === "true";
 }
@@ -59,17 +66,6 @@ export default {
 };
 
 async function runPublishCycle(env) {
-  if (useSandbox(env) && !String(env.PINTEREST_BOARD_ID || "").trim()) {
-    return {
-      checked_at: new Date().toISOString(),
-      environment: "sandbox",
-      published: 0,
-      error:
-        "PINTEREST_BOARD_ID is required in sandbox. Production board IDs do not work there. Uncomment PINTEREST_BOARD_ID in wrangler.toml, set a sandbox board id, and run wrangler deploy.",
-      results: [],
-    };
-  }
-
   const accessToken = await getValidAccessToken(env);
   const nowIso = new Date().toISOString();
 
@@ -96,84 +92,19 @@ async function runPublishCycle(env) {
   };
 }
 
-function uint8ToBase64(bytes) {
-  const chunks = [];
-  const size = 8192;
-  for (let i = 0; i < bytes.length; i += size) {
-    chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + size)));
-  }
-  return btoa(chunks.join(""));
-}
-
-function sniffImageType(bytes) {
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) {
-    return "image/png";
-  }
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8) {
-    return "image/jpeg";
-  }
-  return null;
-}
-
-function imageKeyFromUrl(url) {
-  try {
-    const name = new URL(url).pathname.split("/").filter(Boolean).pop();
-    return name ? decodeURIComponent(name) : "";
-  } catch {
-    return "";
-  }
-}
-
-async function loadImageMedia(env, url) {
-  const key = imageKeyFromUrl(url);
-  if (!env.ASSETS) {
-    return { error: "ASSETS binding missing. Deploy with [assets] in wrangler.toml." };
-  }
-  if (!key) {
-    return { error: `Could not get a filename from ${url}` };
-  }
-
-  const assetUrl = new URL("https://assets.local");
-  assetUrl.pathname = `/${key}`;
-  const asset = await env.ASSETS.fetch(new Request(assetUrl));
-  if (!asset.ok) {
-    return {
-      error: `Image ${key} is not in the deployed images/ folder. Put the file there and run wrangler deploy.`,
-    };
-  }
-
-  const bytes = new Uint8Array(await asset.arrayBuffer());
-  const contentType = sniffImageType(bytes);
-  if (!contentType) {
-    return { error: `Deployed file ${key} is not a PNG or JPEG` };
-  }
-  return { contentType, data: uint8ToBase64(bytes) };
-}
-
-async function markFailed(env, id, errorMessage, httpStatus) {
-  await env.DB.prepare(
-    `UPDATE pin_queue SET status = 'failed', error_message = ? WHERE id = ?`
-  )
-    .bind(errorMessage, id)
-    .run();
-  return { status: "failed", error: errorMessage, http_status: httpStatus };
-}
-
 async function publishPin(env, accessToken, row) {
-  const media = await loadImageMedia(env, row.media_url);
-  if (media.error) {
-    return markFailed(env, row.id, media.error);
-  }
-
+  // A non-empty PINTEREST_BOARD_ID var overrides every row's stored
+  // board_id -- mainly for sandbox, where board IDs differ from
+  // production and re-queuing every pending row would be a hassle.
+  const boardId = String(env.PINTEREST_BOARD_ID || "").trim() || row.board_id;
   const body = {
     title: row.title,
     description: row.description || undefined,
     link: row.link || undefined,
-    board_id: String(env.PINTEREST_BOARD_ID || "").trim() || row.board_id,
+    board_id: boardId,
     media_source: {
-      source_type: "image_base64",
-      content_type: media.contentType,
-      data: media.data,
+      source_type: "image_url",
+      url: row.media_url,
     },
   };
 
@@ -200,7 +131,12 @@ async function publishPin(env, accessToken, row) {
   }
 
   const errorMessage = JSON.stringify(payload).slice(0, 500);
-  return markFailed(env, row.id, errorMessage, response.status);
+  await env.DB.prepare(
+    `UPDATE pin_queue SET status = 'failed', error_message = ? WHERE id = ?`
+  )
+    .bind(errorMessage, row.id)
+    .run();
+  return { status: "failed", error: errorMessage, http_status: response.status };
 }
 
 async function getValidAccessToken(env) {

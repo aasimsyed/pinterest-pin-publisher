@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""
+publish.py
+
+The one command for "I have new pins." Runs the whole pipeline in order:
+
+    1. generate_pinterest_csv.py  -- uploads images, asks Claude for
+       titles/descriptions/keywords, and schedules them
+    2. match_wordpress_links.py   -- finds the right blog post link for
+       each pin
+    3. push_to_d1.py              -- queues everything for the Worker to
+       post on schedule
+
+If a step fails, this stops right there and explains what to fix -- it
+will not push half-finished pins.
+
+Usage:
+    python scripts/publish.py
+"""
+
+from __future__ import annotations
+
+import csv
+import subprocess
+import sys
+from pathlib import Path
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+STEPS = [
+    ("Reading your pin images and writing titles/descriptions", "generate_pinterest_csv.py"),
+    ("Matching each pin to a blog post link", "match_wordpress_links.py"),
+    ("Scheduling your pins", "push_to_d1.py"),
+]
+
+
+def run_step(label: str, script_name: str) -> None:
+    print(f"\n=== {label} ===")
+    result = subprocess.run([sys.executable, str(SCRIPTS_DIR / script_name)])
+    if result.returncode != 0:
+        sys.exit(f"\nStopped: \"{label}\" did not finish. See the message above for what to fix.")
+
+
+def summarize() -> None:
+    csv_path = SCRIPTS_DIR.parent / "pinterest_bulk_upload_with_links.csv"
+    if not csv_path.exists():
+        return
+    with open(csv_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return
+    first_time = rows[0].get("Publish date", "")
+    print(f"\n{len(rows)} pin(s) queued. The first one posts around {first_time} "
+          f"(the Worker checks every 15 minutes).")
+
+
+def main() -> None:
+    for label, script_name in STEPS:
+        run_step(label, script_name)
+    summarize()
+    print("\nAll done. You can close this window.")
+
+
+if __name__ == "__main__":
+    main()
