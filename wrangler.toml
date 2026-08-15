@@ -16,9 +16,26 @@ database_name = "pin-publisher-db"
 database_id = "e259f6d1-7847-4b48-a78d-1e0465f3117d"
 migrations_dir = "migrations"
 
-# Secrets (never put these in this file -- set them with `wrangler secret put`):
+# Pin PNGs in ./images are uploaded on wrangler deploy. The Worker reads them
+# here so it never has to fetch WordPress (the host blocks Cloudflare IPs).
+[assets]
+directory = "./images"
+binding = "ASSETS"
+run_worker_first = true
+
+# Non-secret flags. Production is the default. Set PINTEREST_SANDBOX = "true"
+# to call api-sandbox.pinterest.com instead (Trial apps can create pins there).
+# Sandbox tokens and board IDs are not interchangeable with production.
+# After flipping this, re-run oauth_setup.py --sandbox, put the new refresh
+# token, set PINTEREST_BOARD_ID to a sandbox board, clear oauth_tokens, deploy.
+[vars]
+PINTEREST_SANDBOX = "true"
+# Production board (restore this when you switch sandbox off):
+# PINTEREST_BOARD_ID = "1097471071636272511"
+PINTEREST_BOARD_ID = "660692276524863179"
+
+# Secrets (never put these in this file: set them with `wrangler secret put`):
 #   wrangler secret put PINTEREST_CLIENT_ID
 #   wrangler secret put PINTEREST_CLIENT_SECRET
 #   wrangler secret put PINTEREST_REFRESH_TOKEN
-#   wrangler secret put PINTEREST_ACCESS_TOKEN   (seeded once by scripts/oauth_setup.py, then
-#                                                  the Worker refreshes it automatically)
+#   wrangler secret put MANUAL_TRIGGER_SECRET

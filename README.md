@@ -146,7 +146,10 @@ You only repeat this if you revoke Pinterest access or create a new app.
 python scripts/generate_pinterest_csv.py
 python scripts/match_wordpress_links.py
 python scripts/push_to_d1.py
+wrangler deploy
 ```
+
+`wrangler deploy` also uploads the PNG/JPG files in `images/` so the publisher does not have to download them from WordPress.
 
 That is the whole loop.
 
@@ -200,8 +203,35 @@ Put `.png` or `.jpg` files in `images/` and run the command from this project fo
 **Pinterest browser step does nothing**  
 The redirect URL on the app must be exactly `http://localhost:8765/callback`.
 
+**Pinterest says missing `boards:write` or `pins:read`**  
+The login must request those scopes. Re-authorize, then replace the refresh token and clear the old cached token:
+
+```bash
+python scripts/oauth_setup.py --client-id YOUR_APP_ID --client-secret YOUR_APP_SECRET
+wrangler secret put PINTEREST_REFRESH_TOKEN
+wrangler d1 execute pin-publisher-db --remote --command "DELETE FROM oauth_tokens;"
+wrangler d1 execute pin-publisher-db --remote --command "UPDATE pin_queue SET status = 'pending', error_message = NULL WHERE status = 'failed';"
+```
+
+Click Allow in the browser. The Worker will pick up pending pins on the next 15-minute run.
+
 **Pins never go public**  
-The Pinterest app is still in Trial. Apply for Standard access.
+The Pinterest app is still in Trial. Apply for Standard access. Until then you can publish to sandbox (pins are only visible to you):
+
+```bash
+python scripts/oauth_setup.py --client-id YOUR_APP_ID --client-secret YOUR_APP_SECRET --sandbox
+wrangler secret put PINTEREST_REFRESH_TOKEN
+```
+
+In `wrangler.toml` set `PINTEREST_SANDBOX = "true"` and uncomment `PINTEREST_BOARD_ID` with a sandbox board id from the oauth output. Then:
+
+```bash
+wrangler d1 execute pin-publisher-db --remote --command "DELETE FROM oauth_tokens;"
+wrangler d1 execute pin-publisher-db --remote --command "UPDATE pin_queue SET status = 'pending', error_message = NULL WHERE status = 'failed';"
+wrangler deploy
+```
+
+Switch back to production by setting `PINTEREST_SANDBOX = "false"`, putting the production refresh token, clearing `oauth_tokens`, and deploying again.
 
 **Wrong blog link on a pin**  
 Open the CSV, fix the Link cell, save, then run `python scripts/push_to_d1.py`.
