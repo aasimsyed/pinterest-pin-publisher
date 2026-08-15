@@ -15,8 +15,16 @@
  * publish_at time has actually arrived.
  */
 
-const PINTEREST_API_BASE = "https://api.pinterest.com/v5";
-const PINTEREST_TOKEN_URL = "https://api.pinterest.com/v5/oauth/token";
+const PROD_API_BASE = "https://api.pinterest.com/v5";
+const SANDBOX_API_BASE = "https://api-sandbox.pinterest.com/v5";
+
+function useSandbox(env) {
+  return String(env.PINTEREST_SANDBOX || "").toLowerCase() === "true";
+}
+
+function pinterestApiBase(env) {
+  return useSandbox(env) ? SANDBOX_API_BASE : PROD_API_BASE;
+}
 
 // How many rows to publish per cron tick. Keep this modest -- Pinterest
 // rate-limits pin creation per app/user, and publishing everything at once
@@ -51,6 +59,17 @@ export default {
 };
 
 async function runPublishCycle(env) {
+  if (useSandbox(env) && !String(env.PINTEREST_BOARD_ID || "").trim()) {
+    return {
+      checked_at: new Date().toISOString(),
+      environment: "sandbox",
+      published: 0,
+      error:
+        "PINTEREST_BOARD_ID is required in sandbox. Production board IDs do not work there. Uncomment PINTEREST_BOARD_ID in wrangler.toml, set a sandbox board id, and run wrangler deploy.",
+      results: [],
+    };
+  }
+
   const accessToken = await getValidAccessToken(env);
   const nowIso = new Date().toISOString();
 
@@ -69,22 +88,96 @@ async function runPublishCycle(env) {
     results.push({ id: row.id, title: row.title, ...outcome });
   }
 
-  return { checked_at: nowIso, published: results.length, results };
+  return {
+    checked_at: nowIso,
+    environment: useSandbox(env) ? "sandbox" : "production",
+    published: results.length,
+    results,
+  };
+}
+
+function uint8ToBase64(bytes) {
+  const chunks = [];
+  const size = 8192;
+  for (let i = 0; i < bytes.length; i += size) {
+    chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + size)));
+  }
+  return btoa(chunks.join(""));
+}
+
+function sniffImageType(bytes) {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    return "image/jpeg";
+  }
+  return null;
+}
+
+function imageKeyFromUrl(url) {
+  try {
+    const name = new URL(url).pathname.split("/").filter(Boolean).pop();
+    return name ? decodeURIComponent(name) : "";
+  } catch {
+    return "";
+  }
+}
+
+async function loadImageMedia(env, url) {
+  const key = imageKeyFromUrl(url);
+  if (!env.ASSETS) {
+    return { error: "ASSETS binding missing. Deploy with [assets] in wrangler.toml." };
+  }
+  if (!key) {
+    return { error: `Could not get a filename from ${url}` };
+  }
+
+  const assetUrl = new URL("https://assets.local");
+  assetUrl.pathname = `/${key}`;
+  const asset = await env.ASSETS.fetch(new Request(assetUrl));
+  if (!asset.ok) {
+    return {
+      error: `Image ${key} is not in the deployed images/ folder. Put the file there and run wrangler deploy.`,
+    };
+  }
+
+  const bytes = new Uint8Array(await asset.arrayBuffer());
+  const contentType = sniffImageType(bytes);
+  if (!contentType) {
+    return { error: `Deployed file ${key} is not a PNG or JPEG` };
+  }
+  return { contentType, data: uint8ToBase64(bytes) };
+}
+
+async function markFailed(env, id, errorMessage, httpStatus) {
+  await env.DB.prepare(
+    `UPDATE pin_queue SET status = 'failed', error_message = ? WHERE id = ?`
+  )
+    .bind(errorMessage, id)
+    .run();
+  return { status: "failed", error: errorMessage, http_status: httpStatus };
 }
 
 async function publishPin(env, accessToken, row) {
+  const media = await loadImageMedia(env, row.media_url);
+  if (media.error) {
+    return markFailed(env, row.id, media.error);
+  }
+
   const body = {
     title: row.title,
     description: row.description || undefined,
     link: row.link || undefined,
-    board_id: row.board_id,
+    board_id: String(env.PINTEREST_BOARD_ID || "").trim() || row.board_id,
     media_source: {
-      source_type: "image_url",
-      url: row.media_url,
+      source_type: "image_base64",
+      content_type: media.contentType,
+      data: media.data,
     },
   };
 
-  const response = await fetch(`${PINTEREST_API_BASE}/pins`, {
+  const response = await fetch(`${pinterestApiBase(env)}/pins`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -107,12 +200,7 @@ async function publishPin(env, accessToken, row) {
   }
 
   const errorMessage = JSON.stringify(payload).slice(0, 500);
-  await env.DB.prepare(
-    `UPDATE pin_queue SET status = 'failed', error_message = ? WHERE id = ?`
-  )
-    .bind(errorMessage, row.id)
-    .run();
-  return { status: "failed", error: errorMessage, http_status: response.status };
+  return markFailed(env, row.id, errorMessage, response.status);
 }
 
 async function getValidAccessToken(env) {
@@ -134,7 +222,7 @@ async function getValidAccessToken(env) {
 async function refreshAccessToken(env) {
   const basicAuth = btoa(`${env.PINTEREST_CLIENT_ID}:${env.PINTEREST_CLIENT_SECRET}`);
 
-  const response = await fetch(PINTEREST_TOKEN_URL, {
+  const response = await fetch(`${pinterestApiBase(env)}/oauth/token`, {
     method: "POST",
     headers: {
       Authorization: `Basic ${basicAuth}`,
