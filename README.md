@@ -1,196 +1,337 @@
 # Pinterest Pin Publisher
 
-This tool turns a folder of pin images into scheduled Pinterest posts.
+This app takes pictures from a folder and posts them to Pinterest on a schedule.
 
-You do three things:
+You do this once:
 
-1. One-time setup (a few accounts, a few clicks)
-2. Put new pin images in a folder
-3. Double-click **Publish Pins**
+1. Install two free programs
+2. Make three free accounts and copy a few keys
+3. Double-click **Setup**
 
-That's it. No terminal commands, no manual WordPress uploads, no Cloudflare CLI to learn.
+After that, every time you have new pins:
 
----
+1. Put the pictures in the `images` folder
+2. Double-click **Publish Pins**
 
-## What you need (free accounts)
+You do not need to type commands for the normal loop. You do not upload pictures to WordPress. You do not learn Cloudflare.
 
-| What | Why | Where to get it |
-| --- | --- | --- |
-| Python 3.10 or newer | Runs the app | https://www.python.org/downloads/  On the installer, tick **Add python.exe to PATH**. |
-| An Anthropic account | Claude reads each pin image and writes the title, description, and keywords. It also matches each pin to a blog post. | https://console.anthropic.com/ |
-| A Pinterest Business account plus a developer app | Lets this tool post pins for you | https://developers.pinterest.com/apps/ |
-| A Cloudflare account | Hosts the clock that posts pins on schedule, and your pin images | https://dash.cloudflare.com/ |
-| Node.js | Only for the one-time Cloudflare install | https://nodejs.org/ |
-| Your WordPress site | Blog post links come from here (images do not) | The site you already have |
-
-You do **not** paste secrets into this GitHub folder. Setup saves them on your computer, in your Cloudflare account, or nowhere at all (some values only ever pass through, never stored).
+If you already finished Setup on this computer, skip to [Every time you have new pins](#every-time-you-have-new-pins).
 
 ---
 
-## First time on this computer
+## Before you start
 
-### 1. Get an Anthropic (Claude) key
+Put this whole folder somewhere easy to find, like your Desktop. Do not rename the files inside it.
 
-1. Go to https://console.anthropic.com/settings/keys
-2. Sign in or create an account.
-3. Click **Create Key**.
-4. Copy the key (it starts with `sk-ant-`). Keep the tab open, you will paste it in setup.
+You need:
 
-Anthropic is paid usage. A batch of pins is usually a small bill. Add a payment method in the Anthropic console if it asks.
+- A computer (Mac or Windows)
+- An internet connection
+- The WordPress site you already have (this app only reads post links from it)
+- About 20 minutes the first time
 
-### 2. Create a Pinterest developer app
+Have a notepad ready. You will copy and paste a few keys.
 
-1. Go to https://developers.pinterest.com/apps/
-2. Sign in with the Pinterest **business** account that owns the board.
-3. Create an app. Name it anything, for example `pin-publisher`.
-4. Open the app and find **App ID** and **App secret**.
-5. Add this redirect URL **exactly** (copy and paste):
+**Do not email your keys. Do not put them in this folder. Do not post them online.** Setup will ask you to paste them into a window. That is the only place they go.
+
+---
+
+## Part 1. Install two programs
+
+Do this even if you think you already have them. It is safer to install again than to guess.
+
+### Python (runs the app)
+
+1. Open https://www.python.org/downloads/
+2. Click the big yellow **Download** button.
+3. Open the file you just downloaded.
+4. On Windows: tick the box that says **Add python.exe to PATH** before you click Install. If you miss this box, uninstall Python and install it again.
+5. Click **Install Now** (Windows) or go through the installer (Mac).
+6. When it finishes, close the installer.
+
+### Node.js (needed once, so Setup can talk to Cloudflare)
+
+1. Open https://nodejs.org/
+2. Click the button that says **LTS**.
+3. Open the file you just downloaded and click through with the default choices.
+4. When it finishes, close the installer.
+
+Restart your computer if either installer asks you to.
+
+---
+
+## Part 2. Make three accounts and copy your keys
+
+You can do these in any order. Finish all three before you run Setup.
+
+### A. Anthropic (Claude writes the pin titles)
+
+1. Open https://console.anthropic.com/
+2. Create an account or sign in.
+3. If it asks for a payment method, add one. Claude is a paid service. A batch of pins is usually a small bill.
+4. Open https://console.anthropic.com/settings/keys
+5. Click **Create Key**.
+6. Copy the key. It starts with `sk-ant-`.
+7. Paste it into your notepad. You will need it in Setup.
+
+Keep that tab open until Setup is done.
+
+### B. Pinterest (the account that will post the pins)
+
+Use the **Pinterest business** account that owns the board you want.
+
+1. Open https://developers.pinterest.com/apps/
+2. Sign in.
+3. Click to create an app. Name it anything, for example `pin-publisher`.
+4. Open the app you just made.
+5. Find **App ID** and **App secret**. Copy both into your notepad.
+6. Find the box for a redirect URL (sometimes called Redirect URI or Callback).
+7. Paste this in **exactly**, with no extra spaces and no `https`:
 
    `http://localhost:8765/callback`
 
-6. Keep App ID and App secret handy.
+8. Save if there is a Save button.
 
-While the app is in **Trial** mode, pins may only show in Pinterest's sandbox. Apply for **Standard** access in the same dashboard when you want public pins (see "Applying for Pinterest Standard access" below).
+New Pinterest apps start in **Trial** mode. Trial pins are private. Only you can see them, and only on your own Pinterest profile (usually a board named **Sandbox pins**). A pin link that works on this computer may not open on another computer until Pinterest approves **Standard** access. That is normal. See [Make pins public](#make-pins-public-standard-access) when you are ready.
 
-### 3. Turn on Cloudflare R2 (one click, one time)
+### C. Cloudflare (stores your pictures and posts on a clock)
 
-1. Install Node.js from https://nodejs.org/ (LTS is fine).
-2. Go to https://dash.cloudflare.com/ -> **R2** in the sidebar, and click **Enable** (the free tier is enough for this).
-
-That's the only Cloudflare dashboard step. Everything else, the database, image storage, and the scheduler, gets created for you in the next step.
-
-### 4. Run setup
-
-- **Mac:** double-click `Setup.command`.
-- **Windows:** double-click `Setup.bat`.
-
-(First time only, macOS may ask you to confirm you want to run a file you downloaded, right-click it and choose **Open** if double-clicking refuses.)
-
-It will:
-
-- Install Python packages
-- Ask for your Anthropic key
-- Ask for your website URL, for example `https://yourfrugalmom.com`
-- Ask where pin images live (default: a folder named `images`)
-- Ask for your Pinterest App ID and App secret, then open a browser so you can click **Allow**
-- Show your boards so you can pick one
-- Open a browser so you can log into Cloudflare (only if you aren't already)
-- Create the pin queue database, set up image storage, save your Pinterest credentials, and turn on the scheduler, all automatically
-
-You only repeat this if you revoke Pinterest access, create a new Pinterest app, or want to change your website/board.
+1. Open https://dash.cloudflare.com/
+2. Create a free account or sign in.
+3. You do not need to add a website. If Cloudflare asks you to add a site, you can skip that or close it. This app does not need your domain on Cloudflare.
 
 ---
 
-## Each time you have new pins
+## Part 3. Turn on Cloudflare picture storage (one time)
 
-1. Put the pin image files in the `images` folder (PNG or JPG).
-2. **Mac:** double-click `Publish Pins.command`. **Windows:** double-click `Publish Pins.bat`.
+Cloudflare calls this **R2**. It is not always sitting at the top of the left menu. Use search.
 
-That's the whole loop. The window will show progress, then a summary like "12 pins queued, the first one posts around 2026-08-16T09:00:00", then wait for you to press Enter to close.
+1. Stay on https://dash.cloudflare.com/
+2. Click the search box at the top of the page.
+3. Type `R2` and press Enter.
+4. Open **R2** or **R2 Object Storage**.
+5. If you still cannot find it, look on the left for **Storage & databases**, then click **R2**.
+6. Click **Enable** or finish the free checkout if it asks. The free plan is enough.
+7. You can close the tab. Setup will create the storage folder for you.
 
-Behind the scenes it:
-
-- Uploads each image to your own private image storage (so Pinterest always has a working link, even if WordPress blocks hotlinking)
-- Reads each image with Claude and writes a title, description, and keywords
-- Matches each pin to the right post on your WordPress site
-- Queues the pins. The Worker posts each one when its time arrives (about every 15 minutes)
+If Setup later says `R2 storage isn't turned on`, come back here, click Enable, then run Setup again.
 
 ---
 
-## If something asks for a flag
+## Part 4. Run Setup (one time on this computer)
 
-The double-click launchers cover the normal case. If you want to run a step by hand (for example, to fix one pin's link) you can still run any script directly from a terminal:
+### Open the right file
 
-```bash
-python scripts/generate_pinterest_csv.py
-python scripts/match_wordpress_links.py --site-url https://yoursite.com
-python scripts/push_to_d1.py --board-id YOUR_BOARD_ID
+1. Open this project folder (the one that has `Setup.command` and `Setup.bat` in it).
+2. **Mac:** double-click `Setup.command`.
+3. **Windows:** double-click `Setup.bat`.
+
+If the computer blocks it:
+
+- **Mac:** right-click `Setup.command`, click **Open**, then click **Open** again.
+- **Windows:** click **More info**, then **Run anyway**.
+
+A black or white text window will open. Leave it open. You will type in it.
+
+### What Setup will ask, in order
+
+It installs a couple of Python packages first. That can take a minute. Wait.
+
+Then it asks questions. After each one, press **Enter**.
+
+1. **Anthropic key.** Paste the `sk-ant-` key from your notepad. You may not see the letters as you paste. That is normal. Press Enter.
+2. **Website URL.** Type your site the way people type it in a browser, for example `https://yourfrugalmom.com`. No slash at the end.
+3. **Image folder.** Press Enter to use the default (`images`). Setup will create that folder if it is missing.
+4. **Pinterest App ID.** Paste the App ID from your notepad.
+5. **Pinterest App secret.** Paste the App secret. You may not see the letters. Press Enter.
+6. **Do you already have Pinterest Standard access? (y/n)**  
+   If you are not sure, type `n` and press Enter. That is the safe answer for a new app.
+
+### What happens next (do not close the window)
+
+1. A browser window opens to Pinterest. Sign in if it asks. Click **Allow**. Then come back to the text window.
+2. Setup lists your boards and asks for a number. Type the number of the board you want (or `1` if there is only one) and press Enter.  
+   If you are in Trial mode and have no boards yet, Setup makes one called **Sandbox pins** for you.
+3. A browser window may open to Cloudflare. Sign in and click **Allow** if it asks.
+4. Setup creates the queue, the picture storage, and the poster. Wait until it says **All set**.
+5. Press Enter to close the window.
+
+You only run Setup again if you make a new Pinterest app, revoke access, change your website or board, or get approved for Standard access.
+
+---
+
+## Every time you have new pins
+
+1. Open this project folder.
+2. Open the `images` folder. If you do not see it, run Setup once (it creates the folder).
+3. Put your pin pictures in `images`. Use `.png` or `.jpg` files only. Do not use a Word file, a PDF, or a folder inside `images`.
+4. **Mac:** double-click `Publish Pins.command`.
+5. **Windows:** double-click `Publish Pins.bat`.
+6. Wait. The window will say what it is doing: uploading pictures, writing titles, matching blog links, then scheduling.
+7. When it says **All done**, read the line that tells you how many pins were queued and when the first one posts.
+8. Press Enter to close the window.
+
+The poster checks about every 15 minutes. A pin scheduled for 9:00 may go out any time between 9:00 and 9:14.
+
+You can leave the pictures in `images` after that. If you add new pictures later, put only the new ones in (or leave the old ones, it is fine). New titles that match a title already in the queue get reworded automatically.
+
+---
+
+## Something went wrong
+
+**The window says `python` is not found**  
+Install Python again from https://www.python.org/downloads/. On Windows, tick **Add python.exe to PATH**. Then close every text window and try Setup again.
+
+**The window says no images found**  
+Put `.png` or `.jpg` files directly in the `images` folder, not in a subfolder, then double-click Publish Pins again.
+
+**The Pinterest browser page does nothing, or Setup says the redirect failed**  
+Open your Pinterest app at https://developers.pinterest.com/apps/. The redirect URL must be exactly `http://localhost:8765/callback`. Save, then run Setup again.
+
+**The window says `R2 storage isn't turned on`**  
+Go to https://dash.cloudflare.com/, search for `R2`, click **Enable**, then run Setup again.
+
+**Pins never show up for other people**  
+Your Pinterest app is still in Trial. Pins are private. On this computer, open your Pinterest profile and look for the **Sandbox pins** board (or the board you picked). Do not judge success by opening the pin link on a second computer. When Pinterest approves Standard access, run Setup again and answer `y` to the Standard access question.
+
+**A pin got the wrong blog link**  
+See [Fix one pin's link](#fix-one-pins-link) below.
+
+**Nothing is posting, even after waiting**  
+Run Setup again. It will reconnect the poster.
+
+---
+
+## Extra commands (only if you need them)
+
+You do not need this section for the normal loop.
+
+These commands are for cleanup, testing, or the Standard access video. You type them in a text window that is already sitting in this project folder.
+
+### How to open that window
+
+**Mac**
+
+1. Open **Terminal** (press Command + Space, type `Terminal`, press Enter).
+2. Type `cd ` (c d space). Do not press Enter yet.
+3. Drag this project folder onto the Terminal window. The path appears after `cd `.
+4. Press Enter.
+
+**Windows**
+
+1. Open this project folder in File Explorer.
+2. Click the address bar at the top (the line that shows the folder path).
+3. Type `cmd` and press Enter.
+
+You should now be able to paste a command and press Enter.
+
+### Look at titles and links before they go out
+
+After Publish Pins runs, open `pinterest_bulk_upload_with_links.csv` in Excel or Google Sheets.
+
+### Fix one pin's link
+
+1. Open `pinterest_bulk_upload_with_links.csv`.
+2. Fix the **Link** cell.
+3. Save the file.
+4. In the text window, paste this and press Enter:
+
+```
+python scripts/push_to_d1.py
 ```
 
-Open `pinterest_bulk_upload_with_links.csv` in Excel if you want to glance at titles and links before pushing.
+### Remove extra copies of the same title
 
-Every run already checks new titles against everything already queued and rewords any exact match, but if you ever end up with duplicate-titled rows in the queue (for example from before this check existed), clean them up with:
+Keeps the oldest pin for each title. Deletes the newer copies. Only touches pins that have not posted yet.
 
-```bash
+```
 python scripts/publish.py --dedupe-queue
 ```
 
-This keeps the oldest row for each title and removes the newer, more recent duplicates. It only touches pins still waiting to post (`pending`); add `--all-statuses` to also clean up already-published or failed rows.
+### Post the next pins right now
 
-To wipe the queue and start over, clearing every pending/failed pin and putting already-published pins back to pending so they post again (handy after switching a board between sandbox and production):
+Does not wait for the scheduled time. Use this for a test, or for the Standard access video.
 
-```bash
+```
+python scripts/publish.py --run-now
+```
+
+That posts the next 3. To post just one:
+
+```
+python scripts/publish.py --run-now 1
+```
+
+The window prints each title and a Pinterest link. In Trial mode, that link may only work on this computer while you are logged into the same Pinterest account. On another computer, open your **Sandbox pins** board instead.
+
+### Put already-posted pins back in line
+
+Deletes pins that are waiting or failed. Puts already-posted pins back to waiting so they can post again.
+
+```
 python scripts/publish.py --reset-queue
 ```
 
-It asks for confirmation first; add `-y` to skip that.
+It will ask `Continue?` Type `y` and press Enter.
 
-To publish the next few pending pins right now instead of waiting for the Worker's next check (useful for testing, or for the Standard access demo video below):
+### Empty the queue completely
 
-```bash
-python scripts/publish.py --run-now        # next 3 pins
-python scripts/publish.py --run-now 1      # just the next one
+Deletes every pin in the queue, including ones that already posted. The queue will be empty.
+
+```
+python scripts/publish.py --clear-queue
 ```
 
-Each published pin's title and its live Pinterest link are printed as they go out.
+It will ask `Continue?` Type `y` and press Enter.
+
+### Delete pictures for pins that already posted
+
+Removes those pictures from Cloudflare storage. Pictures still needed by a pin that is waiting or failed are kept. Already-posted Pinterest pins keep working, because Pinterest has its own copy.
+
+```
+python scripts/publish.py --prune-images
+```
+
+It will ask `Continue?` Type `y` and press Enter.
 
 ---
 
-## Applying for Pinterest Standard access
+## Make pins public (Standard access)
 
-Pinterest's Trial/sandbox mode only shows pins to you, not the public (setup already asked whether you have Standard access yet, and uses sandbox automatically if not). To go live, apply for **Standard** access from your app's page at https://developers.pinterest.com/apps/. Pinterest requires a short screen recording showing:
+Trial pins stay private. To post real public pins, apply for **Standard** access on your app page: https://developers.pinterest.com/apps/
 
-1. The full OAuth login (clicking Allow on Pinterest's own consent screen, and the redirect back succeeding), and
-2. A real API action, such as creating a pin.
+Pinterest wants a short screen recording that shows two things:
 
-Both already exist in this app:
+1. You click **Allow** on Pinterest's own login page, and it comes back successfully.
+2. The app really creates a pin.
 
-1. Run setup (`Setup.command` / `Setup.bat`) and record the browser opening to Pinterest, you clicking **Allow**, and the terminal confirming success. Do not skip or speed up this part, Pinterest checks for it.
-2. Run `Publish Pins` once with a test image, then publish it immediately instead of waiting for the 15-minute cron:
+How to record that video:
 
-   ```bash
-   python scripts/publish.py --run-now 1
-   ```
+1. Start your screen recorder.
+2. Double-click **Setup** (`Setup.command` on Mac, `Setup.bat` on Windows).
+3. When the browser opens to Pinterest, click **Allow**. Do not skip this. Do not speed it up. Pinterest checks for it.
+4. Wait until Setup says it finished.
+5. Put one test picture in the `images` folder.
+6. Double-click **Publish Pins**.
+7. Open a text window in this folder (see [How to open that window](#how-to-open-that-window)) and run:
 
-   This prints the pin's live Pinterest link to the terminal.
-3. Open that link (or your board) on screen to show the pin.
+```
+python scripts/publish.py --run-now 1
+```
 
-Sandbox pins are fine for this video, you don't need Standard access yet to record it.
+8. On screen, open your Pinterest board and show the pin. In Trial mode, use your **Sandbox pins** board. That is enough for the video. You do not need Standard access yet to record it.
 
----
-
-## Where things are stored
-
-| What | Saved where |
-| --- | --- |
-| Anthropic key, website, image folder, board, Worker URL, manual-trigger secret | `~/.config/pinterest-pin-publisher/config.json` (one file, readable only by your account) |
-| Pinterest app credentials, refresh token | Cloudflare Worker secrets only, never written to this project folder |
-| Cloudflare login | Your existing `wrangler login` session, this app never stores a separate Cloudflare token |
-| Pin images | Your own private Cloudflare R2 bucket |
-
-Never commit config files, images, or generated CSVs. `.gitignore` already ignores them.
+When Pinterest approves you, run Setup again and answer `y` to "Do you already have Pinterest Standard access?"
 
 ---
 
-## Common problems
+## Where your keys live (you can skip this)
 
-**`python` not found**  
-The double-click launchers try `python3` then fall back to `python`. If both fail, reinstall Python and tick "Add to PATH".
+You do not need to open these files.
 
-**No images found**  
-Put `.png` or `.jpg` files in `images/` before double-clicking Publish Pins.
+- Your Anthropic key, website, image folder, board, and a couple of poster settings live in a private file on this computer: `~/.config/pinterest-pin-publisher/config.json` (Mac) or the same kind of file under your user folder (Windows).
+- Your Pinterest App secret and refresh token live in your Cloudflare account, not in this project folder.
+- Your Cloudflare login lives in Cloudflare's own login on this computer.
+- Your pin pictures live in your own Cloudflare picture storage.
 
-**Pinterest browser step does nothing**  
-The redirect URL on the app must be exactly `http://localhost:8765/callback`.
-
-**Pins never go public**  
-The Pinterest app is still in Trial, which can only create pins in Pinterest's private sandbox (only visible to you). Setup already asked whether you have Standard access and set this up correctly either way, once you're approved, re-run `Setup.command` / `Setup.bat` and answer "y" to switch to production.
-
-**"R2 storage isn't turned on"**  
-Go to https://dash.cloudflare.com/ -> R2 and click Enable, then run setup again.
-
-**Wrong blog link on a pin**  
-Open `pinterest_bulk_upload_with_links.csv`, fix the Link cell, save, then run `python scripts/push_to_d1.py`.
-
-**Worker not posting**  
-Re-run setup, it will re-deploy the Worker and re-check your database and secrets.
+Do not copy those files into email, chat, or GitHub.
