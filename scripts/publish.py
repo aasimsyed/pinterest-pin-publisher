@@ -31,6 +31,9 @@ Usage:
                                                  # pins right away instead of
                                                  # waiting for their scheduled
                                                  # time
+    python scripts/publish.py --menu            # numbered list of every option
+                                                 # (Publish Pins.command / .bat
+                                                 #  opens this)
 """
 
 from __future__ import annotations
@@ -211,6 +214,54 @@ def run_now(limit: int) -> None:
         print(f"  ! Failed \"{row['title']}\": {row.get('error', 'unknown error')}")
 
 
+def run_pipeline() -> None:
+    for label, script_name in STEPS:
+        run_step(label, script_name)
+    summarize()
+    print("\nAll done. You can close this window.")
+
+
+def menu() -> None:
+    print("What do you want to do?\n")
+    print("  1. Publish new pins (the usual)")
+    print("  2. Publish waiting pins right now")
+    print("  3. Remove duplicate titles from the queue")
+    print("  4. Reset the queue (posted pins wait again)")
+    print("  5. Empty the queue completely")
+    print("  6. Delete pictures for pins that already posted")
+    print("  0. Nothing, close this window\n")
+    choice = input("Type a number, then press Enter [1]: ").strip() or "1"
+    if choice == "0":
+        print("Nothing to do.")
+        return
+    if choice == "1":
+        run_pipeline()
+        return
+    if choice == "2":
+        raw = input("How many pins? [3]: ").strip() or "3"
+        try:
+            limit = int(raw)
+        except ValueError:
+            sys.exit("That was not a number.")
+        if limit < 1:
+            sys.exit("Need at least 1 pin.")
+        run_now(limit)
+        return
+    if choice == "3":
+        dedupe(all_statuses=False)
+        return
+    if choice == "4":
+        reset(skip_confirm=False)
+        return
+    if choice == "5":
+        clear(skip_confirm=False)
+        return
+    if choice == "6":
+        prune_images(skip_confirm=False)
+        return
+    sys.exit("That was not a choice on the list.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -242,8 +293,15 @@ def main() -> None:
         help="Publish the next N pending pins immediately instead of waiting for their "
              "scheduled time (default 3).",
     )
+    parser.add_argument(
+        "--menu", action="store_true",
+        help="Show a numbered list of every publish option.",
+    )
     args = parser.parse_args()
 
+    if args.menu:
+        menu()
+        return
     if args.dedupe_queue:
         dedupe(args.all_statuses)
         return
@@ -260,10 +318,7 @@ def main() -> None:
         run_now(args.run_now)
         return
 
-    for label, script_name in STEPS:
-        run_step(label, script_name)
-    summarize()
-    print("\nAll done. You can close this window.")
+    run_pipeline()
 
 
 if __name__ == "__main__":

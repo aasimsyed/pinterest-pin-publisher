@@ -167,9 +167,12 @@ You only run Setup again if you make a new Pinterest app, revoke access, change 
 3. Put your pin pictures in `images`. Use `.png` or `.jpg` files only. Do not use a Word file, a PDF, or a folder inside `images`.
 4. **Mac:** double-click `Publish Pins.command`.
 5. **Windows:** double-click `Publish Pins.bat`.
-6. Wait. The window will say what it is doing: uploading pictures, writing titles, matching blog links, then scheduling.
-7. When it says **All done**, read the line that tells you how many pins were queued and when the first one posts.
-8. Press Enter to close the window.
+6. A list of options appears. Type `1` and press Enter (or just press Enter) to publish new pins.
+7. Wait. The window will say what it is doing: uploading pictures, writing titles, matching blog links, then scheduling.
+8. When it says **All done**, read the line that tells you how many pins were queued and when the first one posts.
+9. Press Enter to close the window.
+
+The other numbers on that list are for later: post waiting pins right now, clean up duplicate titles, reset or empty the queue, or delete stored pictures for pins that already posted.
 
 The poster checks about every 15 minutes. A pin scheduled for 9:00 may go out any time between 9:00 and 9:14.
 
@@ -206,7 +209,15 @@ Run Setup again. It will reconnect the poster.
 
 You do not need this section for the normal loop.
 
-These commands are for cleanup, testing, or the Standard access video. You type them in a text window that is already sitting in this project folder.
+Most of these are also on the list when you double-click **Publish Pins**:
+
+- `2` posts waiting pins right now (it will ask how many)
+- `3` removes duplicate titles
+- `4` resets the queue
+- `5` empties the queue
+- `6` deletes pictures for pins that already posted
+
+If you would rather type a command, open a text window in this project folder.
 
 ### How to open that window
 
@@ -312,12 +323,8 @@ How to record that video:
 3. When the browser opens to Pinterest, click **Allow**. Do not skip this. Do not speed it up. Pinterest checks for it.
 4. Wait until Setup says it finished.
 5. Put one test picture in the `images` folder.
-6. Double-click **Publish Pins**.
-7. Open a text window in this folder (see [How to open that window](#how-to-open-that-window)) and run:
-
-```
-python scripts/publish.py --run-now 1
-```
+6. Double-click **Publish Pins**, type `1`, and press Enter.
+7. Double-click **Publish Pins** again, type `2`, press Enter, then type `1` for how many pins.
 
 8. On screen, open your Pinterest board and show the pin. In Trial mode, use your **Sandbox pins** board. That is enough for the video. You do not need Standard access yet to record it.
 
