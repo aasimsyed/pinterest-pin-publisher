@@ -15,6 +15,7 @@ import re
 import subprocess
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -198,6 +199,53 @@ def upload_image(path: Path, public_base_url: str) -> str:
         "-y",
     ])
     return f"{public_base_url.rstrip('/')}/{path.name}"
+
+
+def _object_key(media_url: str) -> str:
+    """R2 object key is the filename we uploaded (last path segment)."""
+    raw = (media_url or "").strip()
+    if not raw:
+        return ""
+    return urllib.parse.unquote(raw.rstrip("/").rsplit("/", 1)[-1])
+
+
+def prune_published_images() -> dict:
+    """Delete R2 objects that belong only to published pins.
+
+    A file still referenced by a pending or failed pin is left alone, so
+    a retry or a later --run-now still has a working image URL."""
+    result = run_wrangler([
+        "d1", "execute", DATABASE_NAME, "--remote", "--command",
+        "SELECT status, media_url FROM pin_queue;", "--json",
+    ])
+    payload = json.loads(result.stdout or "[]")
+    rows = payload[0].get("results", []) if payload else []
+
+    published: set[str] = set()
+    in_use: set[str] = set()
+    for row in rows:
+        key = _object_key(row.get("media_url") or "")
+        if not key:
+            continue
+        if row.get("status") == "published":
+            published.add(key)
+        else:
+            in_use.add(key)
+
+    skipped = sorted(published & in_use)
+    to_delete = sorted(published - in_use)
+    deleted = []
+    for key in to_delete:
+        deleted_obj = run_wrangler(
+            ["r2", "object", "delete", f"{BUCKET_NAME}/{key}", "--remote", "-y"],
+            check=False,
+        )
+        combined = f"{deleted_obj.stdout}\n{deleted_obj.stderr}".lower()
+        if deleted_obj.returncode == 0 or "not found" in combined:
+            deleted.append(key)
+        else:
+            raise WranglerError((deleted_obj.stderr or deleted_obj.stdout or "unknown error").strip())
+    return {"deleted": deleted, "skipped": skipped}
 
 
 def _sql_quote(value) -> str:

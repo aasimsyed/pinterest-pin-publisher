@@ -25,6 +25,8 @@ Usage:
                                                  # and reset published rows
                                                  # back to pending
     python scripts/publish.py --clear-queue     # delete every row, any status
+    python scripts/publish.py --prune-images    # delete R2 pictures for pins
+                                                 # that already published
     python scripts/publish.py --run-now         # publish the next 3 pending
                                                  # pins right away instead of
                                                  # waiting for their scheduled
@@ -46,6 +48,7 @@ from cloudflare_ops import (
     WranglerError,
     clear_queue,
     dedupe_queue,
+    prune_published_images,
     reset_queue,
     set_worker_secrets,
     trigger_publish,
@@ -129,6 +132,34 @@ def clear(skip_confirm: bool) -> None:
     print(f"Deleted {n} row(s). The queue is empty.")
 
 
+def prune_images(skip_confirm: bool) -> None:
+    print("\n=== Removing pictures for pins that already posted ===")
+    if not skip_confirm:
+        answer = input(
+            "This deletes stored pictures for pins that already posted. "
+            "Pictures still needed by waiting or failed pins are kept. Continue? [y/N] "
+        ).strip().lower()
+        if answer not in ("y", "yes"):
+            print("Cancelled, nothing was changed.")
+            return
+    try:
+        result = prune_published_images()
+    except WranglerError as e:
+        sys.exit(f"Could not prune pictures: {e}")
+    deleted = result["deleted"]
+    skipped = result["skipped"]
+    if deleted:
+        print(f"Deleted {len(deleted)} picture(s):")
+        for name in deleted:
+            print(f"  - {name}")
+    else:
+        print("No published pictures to delete.")
+    if skipped:
+        print(f"Kept {len(skipped)} picture(s) still used by a waiting or failed pin:")
+        for name in skipped:
+            print(f"  - {name}")
+
+
 def resolve_trigger_credentials() -> tuple[str, str]:
     """Return (worker_url, secret), recovering either from wrangler if
     this computer's config was saved before those fields existed."""
@@ -199,8 +230,12 @@ def main() -> None:
         help="Delete every row in the queue, including published ones.",
     )
     parser.add_argument(
+        "--prune-images", action="store_true",
+        help="Delete R2 pictures that belong only to already-published pins.",
+    )
+    parser.add_argument(
         "--yes", "-y", action="store_true",
-        help="With --reset-queue or --clear-queue, skip the confirmation prompt.",
+        help="With --reset-queue, --clear-queue, or --prune-images, skip the confirmation prompt.",
     )
     parser.add_argument(
         "--run-now", nargs="?", type=int, const=3, default=None, metavar="N",
@@ -217,6 +252,9 @@ def main() -> None:
         return
     if args.clear_queue:
         clear(args.yes)
+        return
+    if args.prune_images:
+        prune_images(args.yes)
         return
     if args.run_now is not None:
         run_now(args.run_now)

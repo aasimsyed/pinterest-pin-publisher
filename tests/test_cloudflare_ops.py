@@ -20,6 +20,7 @@ from cloudflare_ops import (  # noqa: E402
     WORKER_URL_RE,
     PublishTriggerError,
     WranglerError,
+    _object_key,
     _sql_quote,
 )
 
@@ -326,6 +327,68 @@ class ClearQueueTests(unittest.TestCase):
 
         self.assertEqual(n, 0)
         self.assertEqual(len(calls), 1)
+
+
+class ObjectKeyTests(unittest.TestCase):
+    def test_filename_from_public_url(self):
+        self.assertEqual(
+            _object_key("https://pub-abc.r2.dev/chili.png"),
+            "chili.png",
+        )
+
+    def test_decodes_percent_encoding(self):
+        self.assertEqual(_object_key("https://pub-abc.r2.dev/Mom%27s%20Chili.png"), "Mom's Chili.png")
+
+    def test_empty_url_is_empty_key(self):
+        self.assertEqual(_object_key(""), "")
+
+
+class PrunePublishedImagesTests(unittest.TestCase):
+    def test_deletes_published_only_and_skips_keys_still_in_use(self):
+        calls = []
+
+        def fake_run_wrangler(args, input_text="", check=True):
+            calls.append(args)
+            if args[-1] == "--json":
+                return subprocess.CompletedProcess(
+                    args, 0,
+                    stdout=(
+                        '[{"results": ['
+                        '{"status": "published", "media_url": "https://pub.r2.dev/done.png"},'
+                        '{"status": "published", "media_url": "https://pub.r2.dev/shared.png"},'
+                        '{"status": "pending", "media_url": "https://pub.r2.dev/shared.png"},'
+                        '{"status": "failed", "media_url": "https://pub.r2.dev/retry.png"}'
+                        '], "success": true}]'
+                    ),
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            result = cloudflare_ops.prune_published_images()
+
+        self.assertEqual(result["deleted"], ["done.png"])
+        self.assertEqual(result["skipped"], ["shared.png"])
+        delete_calls = [c for c in calls if c[:3] == ["r2", "object", "delete"]]
+        self.assertEqual(len(delete_calls), 1)
+        self.assertEqual(delete_calls[0][3], "pin-publisher-images/done.png")
+
+    def test_no_published_images_does_not_call_r2_delete(self):
+        calls = []
+
+        def fake_run_wrangler(args, input_text="", check=True):
+            calls.append(args)
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout='[{"results": [{"status": "pending", "media_url": "https://pub.r2.dev/a.png"}], "success": true}]',
+                stderr="",
+            )
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            result = cloudflare_ops.prune_published_images()
+
+        self.assertEqual(result, {"deleted": [], "skipped": []})
+        self.assertFalse(any(c[:3] == ["r2", "object", "delete"] for c in calls))
 
 
 class WorkerUrlFromWranglerTests(unittest.TestCase):
