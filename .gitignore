@@ -1,5 +1,7 @@
 # Pin images
 images/
+images.zip
+*.zip
 
 # Generated CSVs
 *.csv
