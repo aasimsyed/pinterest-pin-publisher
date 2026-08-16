@@ -27,6 +27,9 @@ env/
 node_modules/
 .wrangler/
 
+# Editor
+.vscode/
+
 # OS
 .DS_Store
 Thumbs.db
