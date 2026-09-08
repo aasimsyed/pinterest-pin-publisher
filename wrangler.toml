@@ -20,7 +20,7 @@ migrations_dir = "migrations"
 # only create pins in Pinterest's sandbox, not on real boards, until
 # approved for Standard access -- see the README section on this.
 [vars]
-PINTEREST_SANDBOX = "true"
+PINTEREST_SANDBOX = "false"
 PINTEREST_BOARD_ID = ""
 
 # Secrets (never put these in this file -- set them with `wrangler secret put`,
