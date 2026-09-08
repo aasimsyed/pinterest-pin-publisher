@@ -179,7 +179,7 @@ The other numbers on that list are for later: post waiting pins right now, clean
 
 The poster checks about every 15 minutes. A pin scheduled for 9:00 may go out any time between 9:00 and 9:14.
 
-You can leave the pictures in `images` after that. If you add new pictures later, put only the new ones in (or leave the old ones, it is fine). New titles that match a title already in the queue get reworded automatically.
+You can leave the pictures in `images` after that. Next time, only the new ones get uploaded and posted, anything already queued or posted gets skipped automatically (matched by file name), so you never end up with the same picture posted twice. New titles that happen to match a title already in the queue get reworded automatically too.
 
 ---
 
@@ -247,6 +247,16 @@ The menu already asks about this each time (step 7 above). If you would rather a
 ```
 python scripts/publish.py --shuffle
 ```
+
+### Post the same picture again on purpose
+
+Normally, a picture already queued or posted gets skipped automatically. If you deliberately want to re-post one (for example, you changed the text on the graphic), add this flag:
+
+```
+python scripts/publish.py --force-requeue
+```
+
+This re-processes every picture currently in `images`, not just the new ones, so only use it when you mean to.
 
 ### Look at titles and links before they go out
 
