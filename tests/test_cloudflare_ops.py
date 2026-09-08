@@ -553,6 +553,30 @@ class TriggerPublishTests(unittest.TestCase):
                 cloudflare_ops.trigger_publish("https://x.workers.dev", "secret", limit=3)
         self.assertIn("Could not reach", str(ctx.exception))
 
+    def test_random_order_true_is_included_in_query_string(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout=60):
+            captured["url"] = request.full_url
+            return io.BytesIO(b'{"results": []}')
+
+        with mock.patch("cloudflare_ops.urllib.request.urlopen", fake_urlopen):
+            cloudflare_ops.trigger_publish("https://x.workers.dev", "secret", limit=3, random_order=True)
+
+        self.assertIn("random=true", captured["url"])
+
+    def test_random_order_defaults_to_false_in_query_string(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout=60):
+            captured["url"] = request.full_url
+            return io.BytesIO(b'{"results": []}')
+
+        with mock.patch("cloudflare_ops.urllib.request.urlopen", fake_urlopen):
+            cloudflare_ops.trigger_publish("https://x.workers.dev", "secret", limit=3)
+
+        self.assertIn("random=false", captured["url"])
+
 
 if __name__ == "__main__":
     unittest.main()

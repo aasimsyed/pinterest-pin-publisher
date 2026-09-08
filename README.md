@@ -168,9 +168,10 @@ You only run Setup again if you make a new Pinterest app, revoke access, change 
 4. **Mac:** double-click `Publish Pins.command`.
 5. **Windows:** double-click `Publish Pins.bat`.
 6. A list of options appears. Type `1` and press Enter (or just press Enter) to publish new pins.
-7. Wait. The window will say what it is doing: uploading pictures, writing titles, matching blog links, then scheduling.
-8. When it says **All done**, read the line that tells you how many pins were queued and when the first one posts.
-9. Press Enter to close the window.
+7. It asks **Shuffle the post order?** Press Enter for no (posts in filename order). Type `y` if your image names group the same topic together (like `*_v1` through `*_v5`) and you would rather mix topics up instead of posting five in a row about the same thing.
+8. Wait. The window will say what it is doing: uploading pictures, writing titles, matching blog links, then scheduling.
+9. When it says **All done**, read the line that tells you how many pins were queued and when the first one posts.
+10. Press Enter to close the window.
 
 The other numbers on that list are for later: post waiting pins right now, clean up duplicate titles, reset or empty the queue, or delete stored pictures for pins that already posted.
 
@@ -237,6 +238,14 @@ If you would rather type a command, open a text window in this project folder.
 
 You should now be able to paste a command and press Enter.
 
+### Post pins in a shuffled order
+
+The menu already asks about this each time (step 7 above). If you would rather always shuffle without being asked, add the flag directly:
+
+```
+python scripts/publish.py --shuffle
+```
+
 ### Look at titles and links before they go out
 
 After Publish Pins runs, open `pinterest_bulk_upload_with_links.csv` in Excel or Google Sheets.
@@ -285,6 +294,12 @@ python scripts/publish.py --run-now 1
 ```
 
 The window prints each title and a Pinterest link. In Trial mode, that link may only work on this computer while you are logged into the same Pinterest account. On another computer, open your **Sandbox pins** board instead.
+
+From the menu, choice `2` also asks **"Pick which ones randomly instead of earliest-scheduled first?"** Press Enter for no. From the command line, add `--shuffle`:
+
+```
+python scripts/publish.py --run-now 1 --shuffle
+```
 
 ### Put already-posted pins back in line
 

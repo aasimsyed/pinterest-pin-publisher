@@ -154,10 +154,17 @@ def worker_url_from_wrangler() -> str | None:
     return match.group(0) if match else None
 
 
-def trigger_publish(worker_url: str, secret: str, limit: int, force: bool = True) -> dict:
+def trigger_publish(
+    worker_url: str, secret: str, limit: int, force: bool = True, random_order: bool = False,
+) -> dict:
     """Call the deployed Worker's /run endpoint directly, so pins can be
-    posted right now instead of waiting for the next cron tick."""
-    query = f"?force={'true' if force else 'false'}&limit={limit}"
+    posted right now instead of waiting for the next cron tick.
+    random_order picks which pending pins to post randomly instead of
+    earliest-scheduled-first."""
+    query = (
+        f"?force={'true' if force else 'false'}&limit={limit}"
+        f"&random={'true' if random_order else 'false'}"
+    )
     request = urllib.request.Request(
         worker_url.rstrip("/") + "/run" + query,
         headers={

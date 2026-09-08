@@ -59,7 +59,9 @@ export default {
   //   curl -H "Authorization: Bearer $MANUAL_TRIGGER_SECRET" https://.../run
   // Add ?force=true&limit=3 to publish the next N pending pins right away
   // instead of waiting for their publish_at time (scripts/publish.py
-  // --run-now uses this).
+  // --run-now uses this). Add &random=true to pick which pending pins
+  // randomly instead of earliest-scheduled-first (only meaningful with
+  // force, since the normal schedule always has a well-defined order).
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname !== "/run") {
@@ -70,23 +72,25 @@ export default {
       return new Response("Unauthorized", { status: 401 });
     }
     const force = url.searchParams.get("force") === "true";
+    const random = url.searchParams.get("random") === "true";
     const limit = Math.min(parseInt(url.searchParams.get("limit"), 10) || BATCH_SIZE, MAX_MANUAL_LIMIT);
-    const result = await runPublishCycle(env, { force, limit });
+    const result = await runPublishCycle(env, { force, limit, random });
     return new Response(JSON.stringify(result, null, 2), {
       headers: { "content-type": "application/json" },
     });
   },
 };
 
-async function runPublishCycle(env, { force = false, limit = BATCH_SIZE } = {}) {
+async function runPublishCycle(env, { force = false, limit = BATCH_SIZE, random = false } = {}) {
   const accessToken = await getValidAccessToken(env);
   const nowIso = new Date().toISOString();
+  const order = random ? "RANDOM()" : "publish_at ASC";
 
   const due = force
     ? await env.DB.prepare(
         `SELECT * FROM pin_queue
          WHERE status = 'pending'
-         ORDER BY publish_at ASC
+         ORDER BY ${order}
          LIMIT ?`
       )
         .bind(limit)
@@ -94,7 +98,7 @@ async function runPublishCycle(env, { force = false, limit = BATCH_SIZE } = {}) 
     : await env.DB.prepare(
         `SELECT * FROM pin_queue
          WHERE status = 'pending' AND publish_at <= ?
-         ORDER BY publish_at ASC
+         ORDER BY ${order}
          LIMIT ?`
       )
         .bind(nowIso, limit)

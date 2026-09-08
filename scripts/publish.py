@@ -16,6 +16,8 @@ will not push half-finished pins.
 
 Usage:
     python scripts/publish.py
+    python scripts/publish.py --shuffle         # randomize post order instead
+                                                 # of filename order
     python scripts/publish.py --dedupe-queue    # remove duplicate-titled
                                                  # rows already queued,
                                                  # keeping the oldest of
@@ -34,6 +36,9 @@ Usage:
                                                  # pins right away instead of
                                                  # waiting for their scheduled
                                                  # time
+    python scripts/publish.py --run-now --shuffle  # same, but pick which
+                                                 # pending pins randomly
+                                                 # instead of earliest-first
     python scripts/publish.py --menu            # numbered list of every option
                                                  # (Publish Pins.command / .bat
                                                  #  opens this)
@@ -70,9 +75,9 @@ STEPS = [
 ]
 
 
-def run_step(label: str, script_name: str) -> None:
+def run_step(label: str, script_name: str, extra_args: list[str] | None = None) -> None:
     print(f"\n=== {label} ===")
-    result = subprocess.run([sys.executable, str(SCRIPTS_DIR / script_name)])
+    result = subprocess.run([sys.executable, str(SCRIPTS_DIR / script_name), *(extra_args or [])])
     if result.returncode != 0:
         sys.exit(f"\nStopped: \"{label}\" did not finish. See the message above for what to fix.")
 
@@ -219,11 +224,12 @@ def resolve_trigger_credentials() -> tuple[str, str]:
     return worker_url, secret
 
 
-def run_now(limit: int) -> None:
-    print(f"\n=== Publishing the next {limit} pending pin(s) now ===")
+def run_now(limit: int, shuffle: bool = False) -> None:
+    order_note = "random" if shuffle else "earliest-scheduled"
+    print(f"\n=== Publishing {limit} pending pin(s) now ({order_note} order) ===")
     worker_url, secret = resolve_trigger_credentials()
     try:
-        result = trigger_publish(worker_url, secret, limit=limit, force=True)
+        result = trigger_publish(worker_url, secret, limit=limit, force=True, random_order=shuffle)
     except PublishTriggerError as e:
         sys.exit(f"Could not trigger the Worker: {e}")
 
@@ -238,11 +244,16 @@ def run_now(limit: int) -> None:
         print(f"  ! Failed \"{row['title']}\": {row.get('error', 'unknown error')}")
 
 
-def run_pipeline() -> None:
+def run_pipeline(shuffle: bool = False) -> None:
     for label, script_name in STEPS:
-        run_step(label, script_name)
+        extra_args = ["--shuffle"] if shuffle and script_name == "generate_pinterest_csv.py" else None
+        run_step(label, script_name, extra_args)
     summarize()
     print("\nAll done. You can close this window.")
+
+
+def _ask_yes_no(prompt: str) -> bool:
+    return input(prompt).strip().lower() in ("y", "yes")
 
 
 def menu() -> None:
@@ -260,7 +271,8 @@ def menu() -> None:
         print("Nothing to do.")
         return
     if choice == "1":
-        run_pipeline()
+        shuffle = _ask_yes_no("Shuffle the post order instead of posting them in filename order? [y/N] ")
+        run_pipeline(shuffle=shuffle)
         return
     if choice == "2":
         raw = input("How many pins? [3]: ").strip() or "3"
@@ -270,7 +282,8 @@ def menu() -> None:
             sys.exit("That was not a number.")
         if limit < 1:
             sys.exit("Need at least 1 pin.")
-        run_now(limit)
+        shuffle = _ask_yes_no("Pick which ones randomly instead of earliest-scheduled first? [y/N] ")
+        run_now(limit, shuffle=shuffle)
         return
     if choice == "3":
         dedupe(all_statuses=False)
@@ -323,12 +336,19 @@ def main() -> None:
     )
     parser.add_argument(
         "--run-now", nargs="?", type=int, const=3, default=None, metavar="N",
-        help="Publish the next N pending pins immediately instead of waiting for their "
-             "scheduled time (default 3).",
+        help="Publish N pending pins immediately instead of waiting for their scheduled "
+             "time (default 3). Combine with --shuffle to pick which N randomly instead "
+             "of earliest-scheduled first.",
     )
     parser.add_argument(
         "--menu", action="store_true",
         help="Show a numbered list of every publish option.",
+    )
+    parser.add_argument(
+        "--shuffle", action="store_true",
+        help="Randomize the post order instead of scheduling pins in filename order. "
+             "With --run-now, picks which pending pins to post randomly instead of "
+             "earliest-scheduled first.",
     )
     args = parser.parse_args()
 
@@ -351,10 +371,10 @@ def main() -> None:
         prune_images(args.yes)
         return
     if args.run_now is not None:
-        run_now(args.run_now)
+        run_now(args.run_now, shuffle=args.shuffle)
         return
 
-    run_pipeline()
+    run_pipeline(shuffle=args.shuffle)
 
 
 if __name__ == "__main__":

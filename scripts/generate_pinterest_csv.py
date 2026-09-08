@@ -17,6 +17,7 @@ API key resolution order:
 
 Usage:
     python scripts/generate_pinterest_csv.py
+    python scripts/generate_pinterest_csv.py --shuffle   # randomize post order
 
 Requires:
     pip install -r requirements.txt
@@ -30,6 +31,7 @@ import csv
 import datetime
 import json
 import mimetypes
+import random
 import sys
 from pathlib import Path
 from typing import Literal
@@ -276,6 +278,11 @@ def main():
                               "if you plan to schedule the rows manually in "
                               "Pinterest's UI instead of bulk-uploading the CSV -- "
                               "bulk upload rejects duplicate titles.")
+    parser.add_argument("--shuffle", action="store_true",
+                         help="Randomize which pin gets which publish date, instead "
+                              "of scheduling them in filename order (so same-topic "
+                              "images named alike, e.g. *_v1..v5, don't all post "
+                              "back-to-back).")
     args = parser.parse_args()
     saved = load_config()
     images_dir = args.images_dir or Path(config_value(saved, "images_dir", "images"))
@@ -292,6 +299,8 @@ def main():
     )
     if not images:
         sys.exit(f"No images found in {images_dir} with extensions {exts}")
+    if args.shuffle:
+        random.shuffle(images)
 
     start_date = datetime.date.fromisoformat(args.start_date)
     api_key = load_api_key(args.api_key)
