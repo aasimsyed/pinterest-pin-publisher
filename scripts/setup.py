@@ -26,6 +26,7 @@ from cloudflare_ops import (
     ensure_d1_database,
     ensure_image_bucket,
     ensure_login,
+    list_accounts,
     reset_after_reauth,
     set_worker_secrets,
     write_database_id,
@@ -57,6 +58,29 @@ def install_packages() -> None:
         [sys.executable, "-m", "pip", "install", "-r", str(ROOT / "requirements.txt")]
     )
     print()
+
+
+def pick_account(saved_id: str) -> str:
+    """Pick which Cloudflare account wrangler should use. Silent unless
+    the login has more than one account and the one already saved (if
+    any) isn't one of them."""
+    accounts = list_accounts()
+    if not accounts:
+        return ""
+    if any(account["id"] == saved_id for account in accounts):
+        return saved_id
+    if len(accounts) == 1:
+        return accounts[0]["id"]
+
+    print("\nYour Cloudflare login has more than one account:\n")
+    for i, account in enumerate(accounts, 1):
+        print(f"  {i}. {account['name']}  (id {account['id']})")
+    print()
+    choice = ask("Number of the account to use", "1")
+    try:
+        return accounts[int(choice) - 1]["id"]
+    except (ValueError, IndexError):
+        sys.exit("That was not a valid account number.")
 
 
 def pick_board(access_token: str, saved_id: str, sandbox: bool) -> tuple[str, str]:
@@ -156,6 +180,9 @@ def main() -> None:
     print("   A browser window may open so you can log into Cloudflare.\n")
     try:
         ensure_login()
+        account_id = pick_account(config_value(saved, "account_id"))
+        if account_id:
+            save_config({"account_id": account_id})
         print("Setting up the pin queue database...")
         database_id = ensure_d1_database()
         write_database_id(database_id)

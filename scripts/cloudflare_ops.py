@@ -19,6 +19,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from app_config import config_value, load_config
+
 ROOT = Path(__file__).resolve().parent.parent
 DATABASE_NAME = "pin-publisher-db"
 BUCKET_NAME = "pin-publisher-images"
@@ -36,6 +38,17 @@ class PublishTriggerError(RuntimeError):
     """Raised when calling the deployed Worker's /run endpoint fails."""
 
 
+def _wrangler_env() -> dict:
+    """Inherit the shell's environment, adding the saved Cloudflare
+    account id (if any) so wrangler doesn't have to ask which account to
+    use when the login has more than one."""
+    env = os.environ.copy()
+    account_id = config_value(load_config(), "account_id")
+    if account_id:
+        env["CLOUDFLARE_ACCOUNT_ID"] = account_id
+    return env
+
+
 def run_wrangler(args: list[str], input_text: str = "", check: bool = True) -> subprocess.CompletedProcess:
     result = subprocess.run(
         ["npx", "wrangler", *args],
@@ -43,6 +56,7 @@ def run_wrangler(args: list[str], input_text: str = "", check: bool = True) -> s
         input=input_text,
         capture_output=True,
         text=True,
+        env=_wrangler_env(),
     )
     if check and result.returncode != 0:
         raise WranglerError((result.stderr or result.stdout or "unknown error").strip())
@@ -55,6 +69,17 @@ def ensure_login() -> None:
         return
     print("Opening your browser to log into Cloudflare...")
     run_wrangler(["login"])
+
+
+ACCOUNT_ROW_RE = re.compile(r"│\s*(.+?)\s*│\s*([0-9a-f]{32})\s*│")
+
+
+def list_accounts() -> list[dict]:
+    """Every Cloudflare account visible to this login, parsed from
+    `wrangler whoami`'s account table. One row unless the login has
+    access to more than one account."""
+    result = run_wrangler(["whoami"], check=False)
+    return [{"name": name, "id": account_id} for name, account_id in ACCOUNT_ROW_RE.findall(result.stdout)]
 
 
 def ensure_d1_database() -> str:

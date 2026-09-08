@@ -26,6 +26,7 @@ KEYS = (
     "pinterest_client_id",
     "worker_url",
     "manual_trigger_secret",
+    "account_id",
 )
 
 

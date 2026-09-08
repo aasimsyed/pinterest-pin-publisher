@@ -70,6 +70,76 @@ class WranglerOutputRegexTests(unittest.TestCase):
     def test_r2_dev_url_absent_returns_no_match(self):
         self.assertIsNone(R2_DEV_URL_RE.search("bucket created, no public url yet"))
 
+
+class WranglerEnvTests(unittest.TestCase):
+    def test_saved_account_id_is_added_to_env(self):
+        with mock.patch.object(cloudflare_ops, "load_config", lambda: {"account_id": "abc123"}):
+            env = cloudflare_ops._wrangler_env()
+        self.assertEqual(env["CLOUDFLARE_ACCOUNT_ID"], "abc123")
+
+    def test_no_saved_account_id_leaves_env_untouched(self):
+        with mock.patch.object(cloudflare_ops, "load_config", lambda: {}):
+            env = cloudflare_ops._wrangler_env()
+        self.assertNotIn("CLOUDFLARE_ACCOUNT_ID", env)
+
+    def test_run_wrangler_passes_env_to_subprocess(self):
+        captured = {}
+
+        def fake_run(cmd, cwd, input, capture_output, text, env):
+            captured["env"] = env
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with mock.patch.object(cloudflare_ops, "load_config", lambda: {"account_id": "abc123"}), \
+             mock.patch.object(subprocess, "run", fake_run):
+            cloudflare_ops.run_wrangler(["whoami"])
+
+        self.assertEqual(captured["env"]["CLOUDFLARE_ACCOUNT_ID"], "abc123")
+
+
+class ListAccountsTests(unittest.TestCase):
+    def test_parses_every_account_row_from_whoami_table(self):
+        sample = (
+            "You are logged in with an OAuth Token, associated with the email a@b.com.\n"
+            "┌──────────────────────────────┬──────────────────────────────────┐\n"
+            "│ Account Name                  │ Account ID                        │\n"
+            "├──────────────────────────────┼──────────────────────────────────┤\n"
+            "│ Aasim.ss@gmail.com's Account  │ 950035267d1186d83269e8b8eb50e572 │\n"
+            "├──────────────────────────────┼──────────────────────────────────┤\n"
+            "│ Yourfrugalfriendetsy's Account│ cd25873e37a0a29723d8fe179427d78d │\n"
+            "└──────────────────────────────┴──────────────────────────────────┘\n"
+        )
+
+        def fake_run_wrangler(args, input_text="", check=True):
+            return subprocess.CompletedProcess(args, 0, stdout=sample, stderr="")
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            accounts = cloudflare_ops.list_accounts()
+
+        self.assertEqual(
+            accounts,
+            [
+                {"name": "Aasim.ss@gmail.com's Account", "id": "950035267d1186d83269e8b8eb50e572"},
+                {"name": "Yourfrugalfriendetsy's Account", "id": "cd25873e37a0a29723d8fe179427d78d"},
+            ],
+        )
+
+    def test_single_account_table_returns_one_row(self):
+        sample = (
+            "┌──────────────────────────────┬──────────────────────────────────┐\n"
+            "│ Account Name                  │ Account ID                        │\n"
+            "├──────────────────────────────┼──────────────────────────────────┤\n"
+            "│ Solo Account                  │ 950035267d1186d83269e8b8eb50e572 │\n"
+            "└──────────────────────────────┴──────────────────────────────────┘\n"
+        )
+
+        def fake_run_wrangler(args, input_text="", check=True):
+            return subprocess.CompletedProcess(args, 0, stdout=sample, stderr="")
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            accounts = cloudflare_ops.list_accounts()
+
+        self.assertEqual(accounts, [{"name": "Solo Account", "id": "950035267d1186d83269e8b8eb50e572"}])
+
     def test_worker_url_extracted_from_deploy_output(self):
         sample = (
             "Uploaded pinterest-pin-publisher (1.23 sec)\n"
