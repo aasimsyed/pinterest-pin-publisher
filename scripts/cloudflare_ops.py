@@ -302,6 +302,21 @@ def existing_titles() -> set[str]:
     return {row["title"].strip().lower() for row in rows if row.get("title")}
 
 
+def existing_media_filenames() -> set[str]:
+    """Return the filename of every image already queued or published (any
+    status), so re-running on a folder that still has old pictures in it
+    skips re-uploading and re-analyzing ones already sent through."""
+    result = run_wrangler([
+        "d1", "execute", DATABASE_NAME, "--remote", "--command",
+        "SELECT media_url FROM pin_queue;", "--json",
+    ])
+    payload = json.loads(result.stdout or "[]")
+    if not payload:
+        return set()
+    rows = payload[0].get("results", [])
+    return {key for row in rows if (key := _object_key(row.get("media_url") or ""))}
+
+
 def list_queue(status: str = "pending") -> list[dict]:
     """Return queued pins ordered by when they'll post, for showing what's
     scheduled. Pass status="" for every row regardless of status."""

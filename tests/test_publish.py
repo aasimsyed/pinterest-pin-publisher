@@ -18,6 +18,7 @@ class RunPipelineTests(unittest.TestCase):
             calls.append((script_name, extra_args))
 
         with mock.patch.object(publish, "run_step", fake_run_step), \
+             mock.patch.object(publish.Path, "exists", return_value=True), \
              mock.patch.object(publish, "summarize"), \
              mock.patch.object(publish, "print"):
             publish.run_pipeline(shuffle=True)
@@ -35,11 +36,45 @@ class RunPipelineTests(unittest.TestCase):
             calls.append(extra_args)
 
         with mock.patch.object(publish, "run_step", fake_run_step), \
+             mock.patch.object(publish.Path, "exists", return_value=True), \
              mock.patch.object(publish, "summarize"), \
              mock.patch.object(publish, "print"):
             publish.run_pipeline(shuffle=False)
 
         self.assertEqual(calls, [None, None, None])
+
+    def test_force_requeue_only_forwarded_to_generate_step(self):
+        calls = []
+
+        def fake_run_step(label, script_name, extra_args=None):
+            calls.append((script_name, extra_args))
+
+        with mock.patch.object(publish, "run_step", fake_run_step), \
+             mock.patch.object(publish.Path, "exists", return_value=True), \
+             mock.patch.object(publish, "summarize"), \
+             mock.patch.object(publish, "print"):
+            publish.run_pipeline(force_requeue=True)
+
+        self.assertEqual(calls, [
+            ("generate_pinterest_csv.py", ["--force-requeue"]),
+            ("match_wordpress_links.py", None),
+            ("push_to_d1.py", None),
+        ])
+
+    def test_stops_early_when_generate_step_finds_nothing_new(self):
+        calls = []
+
+        def fake_run_step(label, script_name, extra_args=None):
+            calls.append(script_name)
+
+        with mock.patch.object(publish, "run_step", fake_run_step), \
+             mock.patch.object(publish.Path, "exists", return_value=False), \
+             mock.patch.object(publish, "summarize") as summarize, \
+             mock.patch.object(publish, "print"):
+            publish.run_pipeline()
+
+        self.assertEqual(calls, ["generate_pinterest_csv.py"])
+        summarize.assert_not_called()
 
 
 class MenuTests(unittest.TestCase):

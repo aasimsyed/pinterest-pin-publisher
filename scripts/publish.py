@@ -39,6 +39,9 @@ Usage:
     python scripts/publish.py --run-now --shuffle  # same, but pick which
                                                  # pending pins randomly
                                                  # instead of earliest-first
+    python scripts/publish.py --force-requeue   # re-process every image even
+                                                 # if its filename is already
+                                                 # queued or published
     python scripts/publish.py --menu            # numbered list of every option
                                                  # (Publish Pins.command / .bat
                                                  #  opens this)
@@ -244,10 +247,22 @@ def run_now(limit: int, shuffle: bool = False) -> None:
         print(f"  ! Failed \"{row['title']}\": {row.get('error', 'unknown error')}")
 
 
-def run_pipeline(shuffle: bool = False) -> None:
+def run_pipeline(shuffle: bool = False, force_requeue: bool = False) -> None:
+    csv_path = SCRIPTS_DIR.parent / "pinterest_bulk_upload.csv"
     for label, script_name in STEPS:
-        extra_args = ["--shuffle"] if shuffle and script_name == "generate_pinterest_csv.py" else None
+        extra_args = None
+        if script_name == "generate_pinterest_csv.py":
+            extra_args = []
+            if shuffle:
+                extra_args.append("--shuffle")
+            if force_requeue:
+                extra_args.append("--force-requeue")
+            extra_args = extra_args or None
         run_step(label, script_name, extra_args)
+        if script_name == "generate_pinterest_csv.py" and not csv_path.exists():
+            print("\nNothing to do -- add new pictures to the images folder "
+                  "and run this again.")
+            return
     summarize()
     print("\nAll done. You can close this window.")
 
@@ -350,6 +365,11 @@ def main() -> None:
              "With --run-now, picks which pending pins to post randomly instead of "
              "earliest-scheduled first.",
     )
+    parser.add_argument(
+        "--force-requeue", action="store_true",
+        help="Process every image in the folder even if its filename is already "
+             "queued or published, instead of skipping already-processed ones.",
+    )
     args = parser.parse_args()
 
     if args.menu:
@@ -374,7 +394,7 @@ def main() -> None:
         run_now(args.run_now, shuffle=args.shuffle)
         return
 
-    run_pipeline(shuffle=args.shuffle)
+    run_pipeline(shuffle=args.shuffle, force_requeue=args.force_requeue)
 
 
 if __name__ == "__main__":

@@ -46,7 +46,13 @@ from anthropic.types import (
 
 from anthropic_auth import load_api_key
 from app_config import config_value, load_config
-from cloudflare_ops import WranglerError, ensure_image_bucket, existing_titles, upload_image
+from cloudflare_ops import (
+    WranglerError,
+    ensure_image_bucket,
+    existing_media_filenames,
+    existing_titles,
+    upload_image,
+)
 
 # Pinterest bulk-upload column order (see Pinterest's help doc)
 FIELDNAMES = [
@@ -239,6 +245,13 @@ def dedupe_titles(
     return rows
 
 
+def filter_new_images(images: list[Path], already_posted: set[str]) -> tuple[list[Path], list[Path]]:
+    """Split images into (new, already queued/posted) by filename."""
+    new = [p for p in images if p.name not in already_posted]
+    skipped = [p for p in images if p.name in already_posted]
+    return new, skipped
+
+
 def build_schedule(n: int, start_date: datetime.date, posts_per_day: int):
     """Yield an ISO publish-date string for each of n items, evenly spaced."""
     # Spread evenly across the day if 4 or fewer/day; otherwise every 2 hours.
@@ -283,6 +296,11 @@ def main():
                               "of scheduling them in filename order (so same-topic "
                               "images named alike, e.g. *_v1..v5, don't all post "
                               "back-to-back).")
+    parser.add_argument("--force-requeue", action="store_true",
+                         help="Process every image in the folder even if its "
+                              "filename is already queued or published. Only use "
+                              "this if you deliberately want to post the same "
+                              "picture again.")
     args = parser.parse_args()
     saved = load_config()
     images_dir = args.images_dir or Path(config_value(saved, "images_dir", "images"))
@@ -299,6 +317,29 @@ def main():
     )
     if not images:
         sys.exit(f"No images found in {images_dir} with extensions {exts}")
+
+    if not args.force_requeue:
+        try:
+            already_posted = existing_media_filenames()
+        except WranglerError as e:
+            print(f"  ! Could not check already-queued images ({e}); "
+                  f"processing every image in the folder.")
+            already_posted = set()
+        images, skipped = filter_new_images(images, already_posted)
+        if skipped:
+            print(f"Skipping {len(skipped)} image(s) already queued or posted "
+                  f"(pass --force-requeue to process them anyway):")
+            for p in skipped:
+                print(f"  - {p.name}")
+
+    if not images:
+        print("\nNo new images to process -- every picture in the folder is "
+              "already queued or posted. Add new pictures to the images "
+              "folder to publish more.")
+        if args.output.exists():
+            args.output.unlink()
+        return
+
     if args.shuffle:
         random.shuffle(images)
 

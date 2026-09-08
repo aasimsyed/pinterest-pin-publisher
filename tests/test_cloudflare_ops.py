@@ -240,6 +240,33 @@ class ExistingTitlesTests(unittest.TestCase):
             self.assertEqual(cloudflare_ops.existing_titles(), set())
 
 
+class ExistingMediaFilenamesTests(unittest.TestCase):
+    def test_returns_filenames_from_media_urls_any_status(self):
+        def fake_run_wrangler(args, input_text="", check=True):
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout='[{"results": ['
+                       '{"media_url": "https://pub-abc.r2.dev/chili.png"}, '
+                       '{"media_url": "https://pub-abc.r2.dev/Mom%27s%20Chili.png"}'
+                       '], "success": true}]',
+                stderr="",
+            )
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            filenames = cloudflare_ops.existing_media_filenames()
+
+        self.assertEqual(filenames, {"chili.png", "Mom's Chili.png"})
+
+    def test_empty_queue_returns_empty_set(self):
+        def fake_run_wrangler(args, input_text="", check=True):
+            return subprocess.CompletedProcess(
+                args, 0, stdout='[{"results": [], "success": true}]', stderr="",
+            )
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            self.assertEqual(cloudflare_ops.existing_media_filenames(), set())
+
+
 class ListQueueTests(unittest.TestCase):
     def test_default_status_filters_to_pending(self):
         captured = {}
