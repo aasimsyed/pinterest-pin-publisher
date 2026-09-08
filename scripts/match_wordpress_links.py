@@ -35,6 +35,11 @@ PER_PAGE = 100
 REVIEW_COLUMNS = ("Suggested Link", "Match Confidence", "Match Post Title")
 MODEL = "claude-sonnet-4-6"
 
+# Keeps each request's output well under max_tokens -- with titles up to
+# 100 chars plus links, matching more than ~25 pins in one call risks
+# Claude's response getting cut off mid-JSON.
+CHUNK_SIZE = 25
+
 MATCH_SYSTEM = """\
 You match Pinterest pin titles to WordPress posts.
 
@@ -132,7 +137,7 @@ def ask_claude_for_matches(
     messages: list[MessageParam] = [{"role": "user", "content": user_payload}]
     response = client.messages.create(
         model=MODEL,
-        max_tokens=4096,
+        max_tokens=8192,
         system=MATCH_SYSTEM,
         messages=messages,
     )
@@ -153,8 +158,14 @@ def match_all_links(
     pin_titles: list[str],
     posts: list[dict],
 ) -> dict[str, str]:
-    """Match every pin. Retry once with leftover pins and unused posts."""
-    assigned = ask_claude_for_matches(client, pin_titles, posts)
+    """Match every pin, a chunk at a time so one request's output can't
+    run long enough to get cut off. Retries any pin left unmatched after
+    the first pass, once, with leftover posts."""
+    assigned: dict[str, str] = {}
+    for i in range(0, len(pin_titles), CHUNK_SIZE):
+        chunk = pin_titles[i:i + CHUNK_SIZE]
+        assigned.update(ask_claude_for_matches(client, chunk, posts))
+
     missing = [title for title in pin_titles if title not in assigned]
     if not missing:
         return assigned
@@ -162,7 +173,9 @@ def match_all_links(
     used_links = set(assigned.values())
     leftover_posts = [post for post in posts if post["link"] not in used_links] or posts
     print(f"Retrying {len(missing)} unmatched pin(s)...")
-    assigned.update(ask_claude_for_matches(client, missing, leftover_posts))
+    for i in range(0, len(missing), CHUNK_SIZE):
+        chunk = missing[i:i + CHUNK_SIZE]
+        assigned.update(ask_claude_for_matches(client, chunk, leftover_posts))
     return assigned
 
 
