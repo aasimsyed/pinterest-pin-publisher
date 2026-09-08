@@ -216,6 +216,7 @@ Most of these are also on the list when you double-click **Publish Pins**:
 - `4` resets the queue
 - `5` empties the queue
 - `6` deletes pictures for pins that already posted
+- `7` shows pins waiting to be published
 
 If you would rather type a command, open a text window in this project folder.
 
