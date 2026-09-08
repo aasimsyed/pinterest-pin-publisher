@@ -295,6 +295,19 @@ def existing_titles() -> set[str]:
     return {row["title"].strip().lower() for row in rows if row.get("title")}
 
 
+def list_queue(status: str = "pending") -> list[dict]:
+    """Return queued pins ordered by when they'll post, for showing what's
+    scheduled. Pass status="" for every row regardless of status."""
+    where = f" WHERE status = {_sql_quote(status)}" if status else ""
+    result = run_wrangler([
+        "d1", "execute", DATABASE_NAME, "--remote", "--command",
+        f"SELECT id, title, status, publish_at, pinterest_pin_url, link "
+        f"FROM pin_queue{where} ORDER BY publish_at ASC;", "--json",
+    ])
+    payload = json.loads(result.stdout or "[]")
+    return payload[0].get("results", []) if payload else []
+
+
 def dedupe_queue(pending_only: bool = True) -> list[dict]:
     """Remove duplicate-titled rows already sitting in pin_queue, keeping
     the oldest row for each title and deleting the more recent ones.

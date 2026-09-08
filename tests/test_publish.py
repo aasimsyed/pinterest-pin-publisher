@@ -64,6 +64,12 @@ class MenuTests(unittest.TestCase):
                 publish.menu()
         prune.assert_called_once_with(skip_confirm=False)
 
+    def test_choice_7_shows_queue(self):
+        with mock.patch.object(publish, "input", return_value="7"):
+            with mock.patch.object(publish, "show_queue") as show:
+                publish.menu()
+        show.assert_called_once_with(all_statuses=False)
+
     def test_choice_0_does_nothing(self):
         with mock.patch.object(publish, "input", return_value="0"):
             with mock.patch.object(publish, "run_pipeline") as pipeline:

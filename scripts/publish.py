@@ -27,6 +27,9 @@ Usage:
     python scripts/publish.py --clear-queue     # delete every row, any status
     python scripts/publish.py --prune-images    # delete R2 pictures for pins
                                                  # that already published
+    python scripts/publish.py --list-queue      # show pins waiting to be
+                                                 # published (add --all-statuses
+                                                 # to include posted/failed too)
     python scripts/publish.py --run-now         # publish the next 3 pending
                                                  # pins right away instead of
                                                  # waiting for their scheduled
@@ -51,6 +54,7 @@ from cloudflare_ops import (
     WranglerError,
     clear_queue,
     dedupe_queue,
+    list_queue,
     prune_published_images,
     reset_queue,
     set_worker_secrets,
@@ -98,6 +102,26 @@ def dedupe(all_statuses: bool) -> None:
     print(f"Removed {len(removed)} duplicate row(s), keeping the oldest of each title:")
     for row in removed:
         print(f"  - #{row['id']} ({row['status']}): \"{row['title']}\"")
+
+
+def show_queue(all_statuses: bool) -> None:
+    status = "" if all_statuses else "pending"
+    label = "every pin in the queue" if all_statuses else "pins waiting to be published"
+    print(f"\n=== {label.capitalize()} ===")
+    try:
+        rows = list_queue(status)
+    except WranglerError as e:
+        sys.exit(f"Could not read the queue: {e}")
+    if not rows:
+        print("Nothing to show.")
+        return
+    for row in rows:
+        when = row.get("publish_at") or "(no date)"
+        marker = f" [{row['status']}]" if all_statuses else ""
+        print(f"  #{row['id']}  {when}{marker}  \"{row['title']}\"")
+        if row.get("pinterest_pin_url"):
+            print(f"      -> {row['pinterest_pin_url']}")
+    print(f"\n{len(rows)} pin(s).")
 
 
 def reset(skip_confirm: bool) -> None:
@@ -229,6 +253,7 @@ def menu() -> None:
     print("  4. Reset the queue (posted pins wait again)")
     print("  5. Empty the queue completely")
     print("  6. Delete pictures for pins that already posted")
+    print("  7. Show pins waiting to be published")
     print("  0. Nothing, close this window\n")
     choice = input("Type a number, then press Enter [1]: ").strip() or "1"
     if choice == "0":
@@ -259,6 +284,9 @@ def menu() -> None:
     if choice == "6":
         prune_images(skip_confirm=False)
         return
+    if choice == "7":
+        show_queue(all_statuses=False)
+        return
     sys.exit("That was not a choice on the list.")
 
 
@@ -270,7 +298,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--all-statuses", action="store_true",
-        help="With --dedupe-queue, also clean up published/failed rows, not just pending ones.",
+        help="With --dedupe-queue or --list-queue, also include published/failed rows, "
+             "not just pending ones.",
+    )
+    parser.add_argument(
+        "--list-queue", action="store_true",
+        help="Show pins waiting to be published instead of publishing new ones.",
     )
     parser.add_argument(
         "--reset-queue", action="store_true",
@@ -301,6 +334,9 @@ def main() -> None:
 
     if args.menu:
         menu()
+        return
+    if args.list_queue:
+        show_queue(args.all_statuses)
         return
     if args.dedupe_queue:
         dedupe(args.all_statuses)

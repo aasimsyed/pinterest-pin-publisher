@@ -240,6 +240,50 @@ class ExistingTitlesTests(unittest.TestCase):
             self.assertEqual(cloudflare_ops.existing_titles(), set())
 
 
+class ListQueueTests(unittest.TestCase):
+    def test_default_status_filters_to_pending(self):
+        captured = {}
+
+        def fake_run_wrangler(args, input_text="", check=True):
+            captured["command"] = args[args.index("--command") + 1]
+            return subprocess.CompletedProcess(args, 0, stdout='[{"results": [], "success": true}]', stderr="")
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            cloudflare_ops.list_queue()
+
+        self.assertIn("WHERE status = 'pending'", captured["command"])
+
+    def test_empty_status_omits_where_clause(self):
+        captured = {}
+
+        def fake_run_wrangler(args, input_text="", check=True):
+            captured["command"] = args[args.index("--command") + 1]
+            return subprocess.CompletedProcess(args, 0, stdout='[{"results": [], "success": true}]', stderr="")
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            cloudflare_ops.list_queue(status="")
+
+        self.assertNotIn("WHERE", captured["command"])
+
+    def test_returns_rows_from_query_results(self):
+        def fake_run_wrangler(args, input_text="", check=True):
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout='[{"results": [{"id": 1, "title": "Pin A", "status": "pending", '
+                       '"publish_at": "2026-08-15T09:00:00Z", "pinterest_pin_url": null, "link": null}], '
+                       '"success": true}]',
+                stderr="",
+            )
+
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+            rows = cloudflare_ops.list_queue()
+
+        self.assertEqual(rows, [{
+            "id": 1, "title": "Pin A", "status": "pending",
+            "publish_at": "2026-08-15T09:00:00Z", "pinterest_pin_url": None, "link": None,
+        }])
+
+
 class DedupeQueueTests(unittest.TestCase):
     def test_keeps_oldest_row_and_deletes_newer_duplicates(self):
         calls = []

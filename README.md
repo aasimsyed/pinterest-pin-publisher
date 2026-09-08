@@ -251,6 +251,16 @@ After Publish Pins runs, open `pinterest_bulk_upload_with_links.csv` in Excel or
 python scripts/push_to_d1.py
 ```
 
+### See what's waiting to post
+
+Shows every pin that hasn't posted yet, with its scheduled time.
+
+```
+python scripts/publish.py --list-queue
+```
+
+To also see pins that already posted or failed, add `--all-statuses`.
+
 ### Remove extra copies of the same title
 
 Keeps the oldest pin for each title. Deletes the newer copies. Only touches pins that have not posted yet.
