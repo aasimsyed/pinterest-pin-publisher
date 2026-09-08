@@ -164,11 +164,13 @@ You only run Setup again if you make a new Pinterest app, revoke access, change 
 
 1. Open this project folder.
 2. Open the `images` folder. If you do not see it, run Setup once (it creates the folder).
-3. Put your pin pictures in `images`. Use `.png` or `.jpg` files only. Do not use a Word file, a PDF, or a folder inside `images`.
+3. Put your pin pictures in `images`. Use `.png` or `.jpg` files only. Do not use a Word file, a PDF, or a folder inside `images`.  
+   **File names do not matter for the title.** The AI reads the words printed on the picture itself to write the Pinterest title, description, and keywords, it does not read the file name. Name your files however you want (`photo1.png`, `IMG_4821.jpg`, anything).  
+   The one thing file names *do* control is posting order: pictures post in alphabetical file-name order unless you choose to shuffle in the next step. So if you want a specific order, name files like `01_...`, `02_...`, `03_...`.
 4. **Mac:** double-click `Publish Pins.command`.
 5. **Windows:** double-click `Publish Pins.bat`.
 6. A list of options appears. Type `1` and press Enter (or just press Enter) to publish new pins.
-7. It asks **Shuffle the post order?** Press Enter for no (posts in filename order). Type `y` if your image names group the same topic together (like `*_v1` through `*_v5`) and you would rather mix topics up instead of posting five in a row about the same thing.
+7. It asks **Shuffle the post order?** Press Enter for no (posts in alphabetical file-name order). Type `y` if your image names group the same topic together (like `*_v1` through `*_v5`) and you would rather mix topics up instead of posting five in a row about the same thing.
 8. Wait. The window will say what it is doing: uploading pictures, writing titles, matching blog links, then scheduling.
 9. When it says **All done**, read the line that tells you how many pins were queued and when the first one posts.
 10. Press Enter to close the window.
