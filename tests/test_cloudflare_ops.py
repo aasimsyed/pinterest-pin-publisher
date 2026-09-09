@@ -96,6 +96,60 @@ class WranglerEnvTests(unittest.TestCase):
         self.assertEqual(captured["env"]["CLOUDFLARE_ACCOUNT_ID"], "abc123")
 
 
+class RunWranglerAutoReloginTests(unittest.TestCase):
+    def test_auth_error_triggers_relogin_then_retries_original_command(self):
+        calls = []
+
+        def fake_invoke(args, input_text=""):
+            calls.append(list(args))
+            if args == ["login"]:
+                return subprocess.CompletedProcess(args, 0, stdout="Successfully logged in.", stderr="")
+            if len([c for c in calls if c == args]) == 1:
+                return subprocess.CompletedProcess(
+                    args, 1, stdout="",
+                    stderr="The given account is not authorized to access this service [code: 7403]",
+                )
+            return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+
+        with mock.patch.object(cloudflare_ops, "_invoke_wrangler", fake_invoke), \
+             mock.patch("builtins.print"):
+            result = cloudflare_ops.run_wrangler(["whoami"])
+
+        self.assertEqual(calls, [["whoami"], ["login"], ["whoami"]])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "ok")
+
+    def test_non_auth_error_does_not_trigger_relogin(self):
+        calls = []
+
+        def fake_invoke(args, input_text=""):
+            calls.append(list(args))
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="Something else went wrong")
+
+        with mock.patch.object(cloudflare_ops, "_invoke_wrangler", fake_invoke), \
+             mock.patch("builtins.print"):
+            with self.assertRaises(cloudflare_ops.WranglerError):
+                cloudflare_ops.run_wrangler(["whoami"])
+
+        self.assertEqual(calls, [["whoami"]])
+
+    def test_relogin_is_not_attempted_for_the_login_command_itself(self):
+        calls = []
+
+        def fake_invoke(args, input_text=""):
+            calls.append(list(args))
+            return subprocess.CompletedProcess(
+                args, 1, stdout="", stderr="You are not authorized to access this service",
+            )
+
+        with mock.patch.object(cloudflare_ops, "_invoke_wrangler", fake_invoke), \
+             mock.patch("builtins.print"):
+            with self.assertRaises(cloudflare_ops.WranglerError):
+                cloudflare_ops.run_wrangler(["login"])
+
+        self.assertEqual(calls, [["login"]])
+
+
 class ListAccountsTests(unittest.TestCase):
     def test_parses_every_account_row_from_whoami_table(self):
         sample = (
@@ -191,10 +245,12 @@ class EnsureImageBucketTests(unittest.TestCase):
                 )
             raise AssertionError(f"unexpected wrangler call: {args}")
 
-        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler):
+        with mock.patch.object(cloudflare_ops, "run_wrangler", fake_run_wrangler), \
+             mock.patch.object(cloudflare_ops.webbrowser, "open") as mock_open:
             with self.assertRaises(WranglerError) as ctx:
                 cloudflare_ops.ensure_image_bucket()
         self.assertIn("R2 storage isn't turned on", str(ctx.exception))
+        mock_open.assert_called_once()
 
     def test_existing_public_url_is_reused_without_enabling_again(self):
         calls = []

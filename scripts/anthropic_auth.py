@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import os
 import sys
+import webbrowser
 
 from app_config import CONFIG_PATH, config_value, load_config, save_config
 from masked_input import read_secret
+
+ANTHROPIC_KEYS_URL = "https://console.anthropic.com/settings/keys"
 
 
 def save_api_key(key: str) -> None:
@@ -21,7 +24,9 @@ def first_run_setup() -> str:
     print("No Anthropic API key found.")
     print(f"Let's set one up -- it'll be saved to {CONFIG_PATH} "
           f"(readable only by your user account) so you won't be asked again.\n")
-    print("Get a key at: https://console.anthropic.com/settings/keys\n")
+    print(f"Opening {ANTHROPIC_KEYS_URL} -- sign in (or create an account), "
+          f"click Create Key, then copy it.\n")
+    webbrowser.open(ANTHROPIC_KEYS_URL)
 
     while True:
         key = read_secret("Paste your Anthropic API key: ")

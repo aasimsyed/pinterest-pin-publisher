@@ -17,6 +17,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 from app_config import config_value, load_config
@@ -49,8 +50,21 @@ def _wrangler_env() -> dict:
     return env
 
 
-def run_wrangler(args: list[str], input_text: str = "", check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run(
+_AUTH_ERROR_MARKERS = (
+    "not authorized",
+    "not authenticated",
+    "please run `wrangler login`",
+    "please run \"wrangler login\"",
+)
+
+
+def _looks_like_auth_error(output: str) -> bool:
+    lowered = output.lower()
+    return any(marker in lowered for marker in _AUTH_ERROR_MARKERS)
+
+
+def _invoke_wrangler(args: list[str], input_text: str = "") -> subprocess.CompletedProcess:
+    return subprocess.run(
         ["npx", "wrangler", *args],
         cwd=ROOT,
         input=input_text,
@@ -58,6 +72,21 @@ def run_wrangler(args: list[str], input_text: str = "", check: bool = True) -> s
         text=True,
         env=_wrangler_env(),
     )
+
+
+def run_wrangler(
+    args: list[str], input_text: str = "", check: bool = True, _allow_relogin: bool = True,
+) -> subprocess.CompletedProcess:
+    result = _invoke_wrangler(args, input_text)
+    if (
+        result.returncode != 0
+        and _allow_relogin
+        and args[:1] != ["login"]
+        and _looks_like_auth_error(f"{result.stdout}\n{result.stderr}")
+    ):
+        print("Your Cloudflare login expired or switched accounts -- reopening the login page...")
+        run_wrangler(["login"], check=False, _allow_relogin=False)
+        result = _invoke_wrangler(args, input_text)
     if check and result.returncode != 0:
         raise WranglerError((result.stderr or result.stdout or "unknown error").strip())
     return result
@@ -198,10 +227,11 @@ def ensure_image_bucket() -> str:
     combined = f"{created.stdout}\n{created.stderr}"
     if created.returncode != 0 and "already exists" not in combined.lower():
         if _r2_enabled_error(combined):
+            webbrowser.open("https://dash.cloudflare.com/?to=/:account/r2/overview")
             raise WranglerError(
                 "R2 storage isn't turned on for this Cloudflare account yet. "
-                "Open https://dash.cloudflare.com/ -> R2 and click Enable "
-                "(free tier is fine), then run this again."
+                "Opened the R2 page for you -- click Enable (free tier is "
+                "fine), then run this again."
             )
         raise WranglerError(combined.strip())
 

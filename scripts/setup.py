@@ -14,6 +14,7 @@ import secrets
 import subprocess
 import sys
 import urllib.error
+import webbrowser
 from pathlib import Path
 
 from anthropic_auth import load_api_key
@@ -141,11 +142,11 @@ def main() -> None:
     (ROOT / images_dir).mkdir(parents=True, exist_ok=True)
 
     print("\n4) Pinterest app")
-    print("   Open https://developers.pinterest.com/apps/")
-    print("   Create an app (or open an existing one).")
-    print("   Add this redirect URL exactly:")
+    print("   Opening https://developers.pinterest.com/apps/ -- create an app")
+    print("   (or open an existing one). Add this redirect URL exactly:")
     print("     http://localhost:8765/callback")
-    print("   Copy the App ID and App secret.\n")
+    print("   Then copy the App ID and App secret.\n")
+    webbrowser.open("https://developers.pinterest.com/apps/")
     client_id = ask("Pinterest App ID", config_value(saved, "pinterest_client_id"))
     client_secret = ask("Pinterest App secret", hidden=True)
     if not client_id or not client_secret:
