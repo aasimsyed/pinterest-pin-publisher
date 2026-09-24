@@ -34,9 +34,10 @@ Put this whole folder somewhere easy to find, like your Desktop. Do not rename t
    - **Whether you already have Pinterest Standard access.** If you're not sure, type `n`, that's the safe answer for a brand-new app. (New apps start in Trial mode, where pins are private to you. See [ADVANCED.md](ADVANCED.md#make-pins-public-standard-access) for applying for Standard access.)
    - A browser window opens to **Pinterest**, click **Allow**, then come back to the window.
    - A browser window may open to **Cloudflare**, sign in and click **Allow** if it asks.
-   - Pick which board to post to when it lists them.
+   - Pick which board to post to when it lists them. This is just a starting default, you'll be asked again (and can pick a different board) every time you publish, so this never locks you in.
+   - **Etsy (optional)**: if you also sell on Etsy and want your shop's listings turned into pins on their own board, type `y` when asked and paste your Etsy API key and shared secret, then click **Allow** on the Etsy login page that opens. See [ADVANCED.md](ADVANCED.md#post-your-etsy-shop-as-pins-too) for where to get those. Type `n` to skip this if you don't sell on Etsy.
 
-4. **Wait for "All set."** Press Enter to close the window. You only run Setup again if you make a new Pinterest app, revoke access, change your website or board, or get approved for Standard access.
+4. **Wait for "All set."** Press Enter to close the window. You only run Setup again if you make a new Pinterest app, revoke access, change your website, add a new board you want to post to, or get approved for Standard access.
 
 ---
 
@@ -49,11 +50,12 @@ Put this whole folder somewhere easy to find, like your Desktop. Do not rename t
 3. **Mac:** double-click `Publish Pins.command`. **Windows:** double-click `Publish Pins.bat`.
 4. A list of options appears. Type `1` and press Enter (or just press Enter) to publish new pins.
 5. It asks **Shuffle the post order?** Press Enter for no. Type `y` if your image names group the same topic together (like `*_v1` through `*_v5`) and you'd rather mix topics up instead of posting several in a row about the same thing.
-6. Wait. The window says what it's doing: uploading pictures, writing titles, matching blog links, then scheduling.
-7. When it says **All done**, read the line that tells you how many pins were queued and when the first one posts.
-8. Press Enter to close the window.
+6. It asks **which board** these pins should go to, listing your boards with the last one you used marked as the default. Press Enter to keep that default, or type a different number, every batch of pins can go to a different board.
+7. Wait. The window says what it's doing: uploading pictures, writing titles, matching blog links, then scheduling.
+8. When it says **All done**, read the line that tells you how many pins were queued and when the first one posts.
+9. Press Enter to close the window.
 
-The other numbers on that list are for later: post waiting pins right now, clean up duplicate titles, reset or empty the queue, or delete stored pictures for pins that already posted. See [ADVANCED.md](ADVANCED.md) for what each one does.
+The other numbers on that list are for later: post waiting pins right now, clean up duplicate titles, reset or empty the queue, delete stored pictures for pins that already posted, (if you set up Etsy) turn your shop's current listings into pins, or schedule a CSV file you already have. See [ADVANCED.md](ADVANCED.md) for what each one does.
 
 The poster checks about every 15 minutes. A pin scheduled for 9:00 may go out any time between 9:00 and 9:14.
 

@@ -42,6 +42,29 @@ Usage:
     python scripts/publish.py --force-requeue   # re-process every image even
                                                  # if its filename is already
                                                  # queued or published
+    python scripts/publish.py --etsy            # build pins from your Etsy
+                                                 # shop's active listings
+                                                 # instead of the images folder
+                                                 # (requires Etsy setup)
+    python scripts/publish.py --etsy --limit 20 # only process 20 new Etsy
+                                                 # listings this run, leaving
+                                                 # the rest for later runs
+    python scripts/publish.py --csv-only        # build the CSV (and, with
+                                                 # --etsy, the pin graphics)
+                                                 # but don't schedule it yet
+    python scripts/publish.py --publish-csv pinterest_bulk_upload.csv
+                                                 # schedule an already-built
+                                                 # CSV instead of building
+                                                 # a new one
+    python scripts/publish.py --etsy --ai-images
+                                                 # restyle each Etsy listing
+                                                 # photo with AI before adding
+                                                 # the title/price text
+    python scripts/publish.py --list-boards     # show your Pinterest boards
+                                                 # and their numbers
+    python scripts/publish.py --board 2         # post to board #2 for just
+                                                 # this run (name also works),
+                                                 # instead of the saved default
     python scripts/publish.py --menu            # numbered list of every option
                                                  # (Publish Pins.command / .bat
                                                  #  opens this)
@@ -85,8 +108,8 @@ def run_step(label: str, script_name: str, extra_args: list[str] | None = None) 
         sys.exit(f"\nStopped: \"{label}\" did not finish. See the message above for what to fix.")
 
 
-def summarize() -> None:
-    csv_path = SCRIPTS_DIR.parent / "pinterest_bulk_upload_with_links.csv"
+def summarize(csv_path: Path | None = None) -> None:
+    csv_path = csv_path or SCRIPTS_DIR.parent / "pinterest_bulk_upload_with_links.csv"
     if not csv_path.exists():
         return
     with open(csv_path, newline="") as f:
@@ -247,9 +270,84 @@ def run_now(limit: int, shuffle: bool = False) -> None:
         print(f"  ! Failed \"{row['title']}\": {row.get('error', 'unknown error')}")
 
 
-def run_pipeline(shuffle: bool = False, force_requeue: bool = False) -> None:
+def cached_boards(saved: dict) -> list[dict]:
+    boards = saved.get("pinterest_boards")
+    return boards if isinstance(boards, list) and boards else []
+
+
+def choose_board(saved: dict, default_id: str, prompt_label: str) -> tuple[str | None, str | None]:
+    """Ask which board this one run should post to, defaulting to whatever
+    was picked last (in setup or a previous run). Nothing is saved back --
+    each run can go to a different board without changing anyone else's
+    default. Returns (None, None) if no board list is cached yet (e.g.
+    setup ran before this existed), so the caller just falls back to each
+    script's own saved default."""
+    boards = cached_boards(saved)
+    if not boards:
+        return None, None
+    default_index = next(
+        (i for i, b in enumerate(boards) if b.get("id") == default_id), 0
+    )
+    print(f"\nWhich board should {prompt_label} go to?\n")
+    for i, board in enumerate(boards, 1):
+        marker = "  (default)" if i - 1 == default_index else ""
+        print(f"  {i}. {board.get('name', '(no name)')}{marker}")
+    choice = input(f"Number of the board [{default_index + 1}]: ").strip() or str(default_index + 1)
+    try:
+        board = boards[int(choice) - 1]
+    except (ValueError, IndexError):
+        sys.exit("That was not a valid board number.")
+    return str(board.get("name") or ""), str(board.get("id") or "")
+
+
+def resolve_board_flag(saved: dict, board_arg: str | None) -> tuple[str | None, str | None]:
+    """Resolve --board (a board number from --list-boards, or an exact,
+    case-insensitive board name) for non-interactive use. Returns
+    (None, None) when no override was given, so the caller falls back to
+    each script's own saved default."""
+    if not board_arg:
+        return None, None
+    boards = cached_boards(saved)
+    for i, board in enumerate(boards, 1):
+        name = str(board.get("name") or "")
+        if board_arg == str(i) or board_arg.strip().lower() == name.strip().lower():
+            return name, str(board.get("id") or "")
+    sys.exit(f"Could not find a board matching \"{board_arg}\". Run "
+              f"--list-boards to see your options, or re-run setup.py to "
+              f"refresh the list.")
+
+
+def list_boards_command() -> None:
+    boards = cached_boards(load_config())
+    if not boards:
+        print("No cached board list yet. Run python scripts/setup.py to fetch your boards.")
+        return
+    print("\nYour Pinterest boards:\n")
+    for i, board in enumerate(boards, 1):
+        print(f"  {i}. {board.get('name', '(no name)')}  (id {board.get('id', '')})")
+
+
+def publish_csv(csv_path: Path, board_id: str | None) -> None:
+    """Schedule an already-built CSV (e.g. one made earlier with
+    --csv-only) instead of generating a new one."""
+    if not csv_path.exists():
+        sys.exit(f"Could not find {csv_path}.")
+    extra_args = ["--csv", str(csv_path)]
+    if board_id:
+        extra_args += ["--board-id", board_id]
+    run_step(f"Scheduling pins from {csv_path.name}", "push_to_d1.py", extra_args)
+    summarize(csv_path)
+    print("\nAll done. You can close this window.")
+
+
+def run_pipeline(
+    shuffle: bool = False, force_requeue: bool = False,
+    board_name: str | None = None, board_id: str | None = None,
+    csv_only: bool = False,
+) -> None:
     csv_path = SCRIPTS_DIR.parent / "pinterest_bulk_upload.csv"
-    for label, script_name in STEPS:
+    steps = STEPS[:-1] if csv_only else STEPS
+    for label, script_name in steps:
         extra_args = None
         if script_name == "generate_pinterest_csv.py":
             extra_args = []
@@ -257,13 +355,61 @@ def run_pipeline(shuffle: bool = False, force_requeue: bool = False) -> None:
                 extra_args.append("--shuffle")
             if force_requeue:
                 extra_args.append("--force-requeue")
+            if board_name:
+                extra_args += ["--board", board_name]
             extra_args = extra_args or None
+        elif script_name == "push_to_d1.py" and board_id:
+            extra_args = ["--board-id", board_id]
         run_step(label, script_name, extra_args)
         if script_name == "generate_pinterest_csv.py" and not csv_path.exists():
             print("\nNothing to do -- add new pictures to the images folder "
                   "and run this again.")
             return
+    if csv_only:
+        linked_csv = SCRIPTS_DIR.parent / "pinterest_bulk_upload_with_links.csv"
+        final_csv = linked_csv if linked_csv.exists() else csv_path
+        print(f"\nWrote {final_csv.name}. Nothing has been scheduled yet.")
+        print(f"When you're ready: python scripts/publish.py --publish-csv {final_csv.name}")
+        return
     summarize()
+    print("\nAll done. You can close this window.")
+
+
+def run_etsy_pipeline(
+    shuffle: bool = False, force_requeue: bool = False,
+    board_name: str | None = None, board_id: str | None = None,
+    limit: int | None = None, csv_only: bool = False, ai_images: bool = False,
+) -> None:
+    saved = load_config()
+    board_id = board_id or config_value(saved, "etsy_board_id")
+    if not csv_only and not board_id:
+        sys.exit("Etsy isn't set up yet. Run python scripts/setup.py and choose to set up Etsy.")
+
+    csv_path = SCRIPTS_DIR.parent / "etsy_bulk_upload.csv"
+    extra_args = []
+    if shuffle:
+        extra_args.append("--shuffle")
+    if force_requeue:
+        extra_args.append("--force-requeue")
+    if board_name:
+        extra_args += ["--board", board_name]
+    if limit is not None:
+        extra_args += ["--limit", str(limit)]
+    if ai_images:
+        extra_args.append("--ai-images")
+    run_step("Building pins from your Etsy listings", "generate_etsy_csv.py", extra_args or None)
+    if not csv_path.exists():
+        print("\nNothing to do -- every active Etsy listing is already queued or posted.")
+        return
+    if csv_only:
+        print(f"\nWrote {csv_path.name}. Nothing has been scheduled yet.")
+        print(f"When you're ready: python scripts/publish.py --publish-csv {csv_path.name}")
+        return
+    run_step(
+        "Scheduling your Etsy pins", "push_to_d1.py",
+        ["--csv", str(csv_path), "--board-id", board_id],
+    )
+    summarize(csv_path)
     print("\nAll done. You can close this window.")
 
 
@@ -272,6 +418,7 @@ def _ask_yes_no(prompt: str) -> bool:
 
 
 def menu() -> None:
+    etsy_configured = bool(config_value(load_config(), "etsy_api_key"))
     print("What do you want to do?\n")
     print("  1. Publish new pins (the usual)")
     print("  2. Publish waiting pins right now")
@@ -280,6 +427,9 @@ def menu() -> None:
     print("  5. Empty the queue completely")
     print("  6. Delete pictures for pins that already posted")
     print("  7. Show pins waiting to be published")
+    if etsy_configured:
+        print("  8. Publish new Etsy pins")
+    print("  9. Schedule pins from a CSV file you already have")
     print("  0. Nothing, close this window\n")
     choice = input("Type a number, then press Enter [1]: ").strip() or "1"
     if choice == "0":
@@ -287,7 +437,10 @@ def menu() -> None:
         return
     if choice == "1":
         shuffle = _ask_yes_no("Shuffle the post order instead of posting them in filename order? [y/N] ")
-        run_pipeline(shuffle=shuffle)
+        csv_only = _ask_yes_no("Only build the CSV without scheduling it yet? [y/N] ")
+        saved = load_config()
+        board_name, board_id = choose_board(saved, config_value(saved, "board_id"), "these new pins")
+        run_pipeline(shuffle=shuffle, board_name=board_name, board_id=board_id, csv_only=csv_only)
         return
     if choice == "2":
         raw = input("How many pins? [3]: ").strip() or "3"
@@ -314,6 +467,36 @@ def menu() -> None:
         return
     if choice == "7":
         show_queue(all_statuses=False)
+        return
+    if choice == "8" and etsy_configured:
+        shuffle = _ask_yes_no("Shuffle the post order instead of listing order? [y/N] ")
+        raw_limit = input("How many listings to process? [all]: ").strip()
+        limit = None
+        if raw_limit:
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                sys.exit("That was not a number.")
+            if limit < 1:
+                sys.exit("Need at least 1 listing.")
+        ai_images = _ask_yes_no(
+            "Restyle photos with AI before adding text? Costs about $0.04/pin extra. [y/N] "
+        )
+        csv_only = _ask_yes_no("Only build the CSV without scheduling it yet? [y/N] ")
+        saved = load_config()
+        board_name, board_id = choose_board(saved, config_value(saved, "etsy_board_id"), "your Etsy pins")
+        run_etsy_pipeline(
+            shuffle=shuffle, board_name=board_name, board_id=board_id,
+            limit=limit, csv_only=csv_only, ai_images=ai_images,
+        )
+        return
+    if choice == "9":
+        raw_path = input("Path to the CSV file: ").strip()
+        if not raw_path:
+            sys.exit("Need a file path.")
+        saved = load_config()
+        _, board_id = choose_board(saved, config_value(saved, "board_id"), "these pins")
+        publish_csv(Path(raw_path), board_id)
         return
     sys.exit("That was not a choice on the list.")
 
@@ -370,10 +553,47 @@ def main() -> None:
         help="Process every image in the folder even if its filename is already "
              "queued or published, instead of skipping already-processed ones.",
     )
+    parser.add_argument(
+        "--etsy", action="store_true",
+        help="Build pins from your Etsy shop's active listings instead of the "
+             "images folder (requires Etsy setup in scripts/setup.py).",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="With --etsy, only process this many new listings, useful for a "
+             "first small batch out of a large shop.",
+    )
+    parser.add_argument(
+        "--board", default=None,
+        help="Post to this board just for this run (by name, or the number "
+             "shown by --list-boards), instead of the saved default.",
+    )
+    parser.add_argument(
+        "--list-boards", action="store_true",
+        help="Show your cached Pinterest boards and their numbers for --board.",
+    )
+    parser.add_argument(
+        "--csv-only", action="store_true",
+        help="Build the pin CSV (and Etsy pin graphics, with --etsy) but don't "
+             "schedule it yet. Schedule it later with --publish-csv.",
+    )
+    parser.add_argument(
+        "--publish-csv", default=None, type=Path, metavar="PATH",
+        help="Schedule pins from an existing CSV file instead of building a new one.",
+    )
+    parser.add_argument(
+        "--ai-images", action="store_true",
+        help="With --etsy, restyle each listing photo with Google Gemini "
+             "(better lighting/background) before adding the title/price "
+             "text. Costs about $0.04/pin extra and needs a Gemini API key.",
+    )
     args = parser.parse_args()
 
     if args.menu:
         menu()
+        return
+    if args.list_boards:
+        list_boards_command()
         return
     if args.list_queue:
         show_queue(args.all_statuses)
@@ -394,7 +614,25 @@ def main() -> None:
         run_now(args.run_now, shuffle=args.shuffle)
         return
 
-    run_pipeline(shuffle=args.shuffle, force_requeue=args.force_requeue)
+    saved = load_config()
+    board_name, board_id = resolve_board_flag(saved, args.board)
+    if args.publish_csv is not None:
+        if board_id is None and sys.stdin.isatty():
+            _, board_id = choose_board(saved, config_value(saved, "board_id"), "these pins")
+        publish_csv(args.publish_csv, board_id)
+        return
+    if args.etsy:
+        run_etsy_pipeline(
+            shuffle=args.shuffle, force_requeue=args.force_requeue,
+            board_name=board_name, board_id=board_id, limit=args.limit,
+            csv_only=args.csv_only, ai_images=args.ai_images,
+        )
+        return
+
+    run_pipeline(
+        shuffle=args.shuffle, force_requeue=args.force_requeue,
+        board_name=board_name, board_id=board_id, csv_only=args.csv_only,
+    )
 
 
 if __name__ == "__main__":

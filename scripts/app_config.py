@@ -27,6 +27,15 @@ KEYS = (
     "worker_url",
     "manual_trigger_secret",
     "account_id",
+    "etsy_api_key",
+    "etsy_shared_secret",
+    "etsy_refresh_token",
+    "etsy_shop_name",
+    "etsy_shop_id",
+    "etsy_board_name",
+    "etsy_board_id",
+    "pinterest_boards",
+    "gemini_api_key",
 )
 
 

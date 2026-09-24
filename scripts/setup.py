@@ -33,6 +33,11 @@ from cloudflare_ops import (
     write_database_id,
     write_pinterest_vars,
 )
+from etsy_ops import EtsyError, find_shop_id
+from etsy_oauth import (
+    exchange_code_for_tokens as etsy_exchange_code_for_tokens,
+    get_authorization_code as etsy_get_authorization_code,
+)
 from oauth_setup import (
     create_board,
     exchange_code_for_tokens,
@@ -84,32 +89,42 @@ def pick_account(saved_id: str) -> str:
         sys.exit("That was not a valid account number.")
 
 
-def pick_board(access_token: str, saved_id: str, sandbox: bool) -> tuple[str, str]:
+def fetch_boards(access_token: str, sandbox: bool) -> list[dict]:
+    """Every board on the account, normalized to plain {name, id} dicts so
+    it can be cached in config.json and reused at publish time -- picking
+    a board no longer has to be locked in once here at setup."""
     try:
-        boards = list_boards(access_token, sandbox=sandbox)
+        raw_boards = list_boards(access_token, sandbox=sandbox)
     except urllib.error.HTTPError as e:
         print(f"Could not list boards automatically ({e.code}).")
-        boards = []
+        raw_boards = []
 
-    if not boards and sandbox:
+    if not raw_boards and sandbox:
         print("No sandbox boards yet -- creating one for testing...")
         board = create_board(access_token, "Sandbox pins", sandbox=True)
-        return str(board.get("name") or "Sandbox pins"), str(board.get("id") or "")
+        raw_boards = [board]
 
+    return [
+        {"name": str(b.get("name") or "(no name)"), "id": str(b.get("id") or "")}
+        for b in raw_boards
+    ]
+
+
+def pick_board(boards: list[dict], saved_id: str, label: str = "publish to") -> tuple[str, str]:
     if not boards:
-        board_id = ask("Pinterest board ID (from the board URL)", saved_id)
+        board_id = ask(f"Pinterest board ID to {label} (from the board URL)", saved_id)
         return "", board_id
-    print("Your Pinterest boards:\n")
+    print(f"Boards to {label}:\n")
     for i, board in enumerate(boards, 1):
-        print(f"  {i}. {board.get('name', '(no name)')}  (id {board.get('id', '')})")
+        marker = "  (previously used)" if board["id"] == saved_id else ""
+        print(f"  {i}. {board['name']}  (id {board['id']}){marker}")
     print()
-    choice = ask("Number of the board to publish to", "1")
+    choice = ask("Number of the board", "1")
     try:
-        index = int(choice) - 1
-        board = boards[index]
+        board = boards[int(choice) - 1]
     except (ValueError, IndexError):
         sys.exit("That was not a valid board number.")
-    return str(board.get("name") or ""), str(board.get("id") or "")
+    return board["name"], board["id"]
 
 
 def main() -> None:
@@ -170,14 +185,63 @@ def main() -> None:
     if not refresh_token:
         sys.exit("Pinterest did not return a refresh token. Check the app scopes.")
 
-    print("\n5) Which board should pins go on?")
-    board_name, board_id = pick_board(access_token, config_value(saved, "board_id"), sandbox)
+    boards = fetch_boards(access_token, sandbox)
+
+    print("\n5) Which board should pins go on by default?")
+    print("   You can pick a different board for any individual run later --")
+    print("   this is just the starting default.\n")
+    board_name, board_id = pick_board(boards, config_value(saved, "board_id"))
     if not board_name:
         board_name = ask("Board name", config_value(saved, "board_name"))
     if not board_id:
         sys.exit("Could not get a board ID.")
 
-    print("\n6) Cloudflare (hosts the scheduler and your pin images)")
+    print("\n6) Etsy (optional)")
+    print("   Turn your Etsy shop's active listings into pins too, on a")
+    print("   separate board from your other pins.\n")
+    want_etsy = ask("Also post your Etsy shop's listings as pins? (y/n)", "n").lower().startswith("y")
+    etsy_api_key = etsy_shared_secret = etsy_shop_name = etsy_shop_id = ""
+    etsy_refresh_token = ""
+    etsy_board_name = etsy_board_id = ""
+    if want_etsy:
+        print("   Opening https://www.etsy.com/developers/your-apps -- create a")
+        print("   seller app (or open an existing one), then copy its keystring")
+        print("   and shared secret. Also add this callback URL exactly:")
+        print("     http://localhost:8766/callback\n")
+        webbrowser.open("https://www.etsy.com/developers/your-apps")
+        etsy_api_key = ask("Etsy API key (keystring)", config_value(saved, "etsy_api_key"), hidden=True)
+        etsy_shared_secret = ask("Etsy shared secret", hidden=True)
+        etsy_shop_name = ask("Etsy shop name (from your shop's URL)", config_value(saved, "etsy_shop_name"))
+        if etsy_api_key and etsy_shared_secret and etsy_shop_name:
+            try:
+                etsy_shop_id = find_shop_id(etsy_api_key, etsy_shared_secret, etsy_shop_name)
+                print(f"   Found your shop (id {etsy_shop_id}).\n")
+            except EtsyError as e:
+                print(f"   ! Could not find that shop ({e}). You can fix this by "
+                      f"re-running setup later.\n")
+
+        if etsy_api_key:
+            print("   Reading your shop's listings also needs Etsy's own login --")
+            print("   a browser window will open. Click Allow, then come back here.\n")
+            try:
+                etsy_code, etsy_verifier = etsy_get_authorization_code(etsy_api_key)
+                etsy_tokens = etsy_exchange_code_for_tokens(etsy_api_key, etsy_code, etsy_verifier)
+                etsy_refresh_token = etsy_tokens.get("refresh_token") or ""
+                if not etsy_refresh_token:
+                    print("   ! Etsy did not return a refresh token. You can fix this by "
+                          "re-running setup later.\n")
+            except (RuntimeError, urllib.error.HTTPError) as e:
+                print(f"   ! Could not connect to Etsy ({e}). You can fix this by "
+                      f"re-running setup later.\n")
+
+        print("   Which board should Etsy pins go on by default?")
+        etsy_board_name, etsy_board_id = pick_board(
+            boards, config_value(saved, "etsy_board_id"), label="post Etsy pins to"
+        )
+        if not etsy_board_name:
+            etsy_board_name = ask("Etsy board name", config_value(saved, "etsy_board_name"))
+
+    print("\n7) Cloudflare (hosts the scheduler and your pin images)")
     print("   A browser window may open so you can log into Cloudflare.\n")
     try:
         ensure_login()
@@ -213,6 +277,14 @@ def main() -> None:
         "pinterest_client_id": client_id,
         "worker_url": worker_url,
         "manual_trigger_secret": manual_trigger_secret,
+        "etsy_api_key": etsy_api_key,
+        "etsy_shared_secret": etsy_shared_secret,
+        "etsy_refresh_token": etsy_refresh_token,
+        "etsy_shop_name": etsy_shop_name,
+        "etsy_shop_id": etsy_shop_id,
+        "etsy_board_name": etsy_board_name,
+        "etsy_board_id": etsy_board_id,
+        "pinterest_boards": boards,
     })
 
     print("\nAll set" + (" (sandbox mode -- pins are private until you have "
