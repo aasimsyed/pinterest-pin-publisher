@@ -44,7 +44,7 @@ Put this whole folder somewhere easy to find, like your Desktop. Do not rename t
 ## Every time you have new pins
 
 1. Open this project folder, then open the `images` folder (Setup created it for you).
-2. Put your pin pictures in `images`. Use `.png` or `.jpg` files only. Do not use a Word file, a PDF, or a folder inside `images`.  
+2. Put your pin pictures in `images`. Use `.png` or `.jpg` files only. Do not use a Word file or a PDF. You can put a batch in its own folder inside `images` (for example `images/summer`). If any folders like that exist, Publish Pins asks which one to use. Press Enter to keep using `images` itself. Give every picture a different file name, even across folders. Two pictures called `01.png` in different folders count as the same pin, so the second one gets skipped.  
    **File names do not matter for the title.** The AI reads the words printed on the picture itself, it does not read the file name. Name your files however you want.  
    The one thing file names *do* control is posting order: pictures post in alphabetical file-name order unless you shuffle in the next step. Name files like `01_...`, `02_...` if you want a specific order.
 3. **Mac:** double-click `Publish Pins.command`. **Windows:** double-click `Publish Pins.bat`.
@@ -69,7 +69,7 @@ You can leave the pictures in `images` after that. Next time, only the new ones 
 Close every text window and double-click Setup again, it installs Python automatically. If it still can't, see [ADVANCED.md](ADVANCED.md#something-went-wrong) for a manual install link.
 
 **The window says no images found**  
-Put `.png` or `.jpg` files directly in the `images` folder, not in a subfolder, then double-click Publish Pins again.
+Put `.png` or `.jpg` files in the `images` folder, or in the folder you picked from the list, then double-click Publish Pins again.
 
 **Pins never show up for other people**  
 Your Pinterest app is still in Trial. Pins are private. See [ADVANCED.md](ADVANCED.md#something-went-wrong) for details and how to get Standard access.

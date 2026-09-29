@@ -1,6 +1,7 @@
 """Menu routing tests for publish.py. Action functions are mocked."""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -122,6 +123,153 @@ class RunPipelineTests(unittest.TestCase):
 
         self.assertEqual(calls, ["generate_pinterest_csv.py", "match_wordpress_links.py"])
         summarize.assert_not_called()
+
+    def test_images_dir_only_forwarded_to_generate_step(self):
+        calls = []
+
+        def fake_run_step(label, script_name, extra_args=None):
+            calls.append((script_name, extra_args))
+
+        with mock.patch.object(publish, "run_step", fake_run_step), \
+             mock.patch.object(publish.Path, "exists", return_value=True), \
+             mock.patch.object(publish, "summarize"), \
+             mock.patch.object(publish, "print"):
+            publish.run_pipeline(images_dir=Path("images/summer"))
+
+        self.assertEqual(calls, [
+            ("generate_pinterest_csv.py", ["--images-dir", "images/summer"]),
+            ("match_wordpress_links.py", None),
+            ("push_to_d1.py", None),
+        ])
+
+
+class ImagesDirTests(unittest.TestCase):
+    def test_resolve_uses_images_when_unset(self):
+        self.assertEqual(publish.resolve_images_dir({}, None), publish.ROOT / "images")
+
+    def test_resolve_uses_setup_folder_when_flag_omitted(self):
+        self.assertEqual(
+            publish.resolve_images_dir({"images_dir": "custom"}, None),
+            publish.ROOT / "custom",
+        )
+
+    def test_resolve_absolute_config_path_is_kept(self):
+        self.assertEqual(
+            publish.resolve_images_dir({"images_dir": "/tmp/pins"}, None),
+            Path("/tmp/pins"),
+        )
+
+    def test_resolve_flag_wins_over_setup(self):
+        self.assertEqual(
+            publish.resolve_images_dir({"images_dir": "custom"}, Path("batch")),
+            Path("batch"),
+        )
+
+    def test_list_image_subdirs_skips_files_and_hidden_or_generated_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "summer").mkdir()
+            (root / "Winter").mkdir()
+            (root / "_etsy_generated").mkdir()
+            (root / ".hidden").mkdir()
+            (root / "pin.png").write_bytes(b"")
+            self.assertEqual(
+                publish.list_image_subdirs(root),
+                [root / "summer", root / "Winter"],
+            )
+
+    def test_list_image_subdirs_missing_folder_is_empty(self):
+        self.assertEqual(publish.list_image_subdirs(Path("does-not-exist-images")), [])
+
+    def test_choose_images_dir_without_subdirs_does_not_prompt(self):
+        base = Path("images")
+        with mock.patch.object(publish, "list_image_subdirs", return_value=[]), \
+             mock.patch.object(publish, "input", side_effect=AssertionError("prompted")):
+            self.assertEqual(publish.choose_images_dir(base), base)
+
+    def test_main_forwards_images_dir_flag(self):
+        with mock.patch.object(sys, "argv", ["publish.py", "--images-dir", "photos/batch"]), \
+             mock.patch.object(publish, "load_config", return_value={}), \
+             mock.patch.object(publish, "run_pipeline") as pipeline:
+            publish.main()
+        pipeline.assert_called_once_with(
+            shuffle=False, force_requeue=False,
+            board_name=None, board_id=None, csv_only=False,
+            images_dir=Path("photos/batch"),
+        )
+
+    def test_main_defaults_images_dir_to_images(self):
+        with mock.patch.object(sys, "argv", ["publish.py"]), \
+             mock.patch.object(publish, "load_config", return_value={}), \
+             mock.patch.object(publish, "run_pipeline") as pipeline:
+            publish.main()
+        pipeline.assert_called_once_with(
+            shuffle=False, force_requeue=False,
+            board_name=None, board_id=None, csv_only=False,
+            images_dir=publish.ROOT / "images",
+        )
+
+    def test_main_etsy_with_images_dir_exits(self):
+        with mock.patch.object(sys, "argv", ["publish.py", "--etsy", "--images-dir", "x"]), \
+             mock.patch.object(publish, "run_etsy_pipeline") as etsy:
+            with self.assertRaises(SystemExit):
+                publish.main()
+        etsy.assert_not_called()
+
+    def test_display_path_is_project_relative_when_inside_root(self):
+        self.assertEqual(publish._display_path(publish.ROOT / "images" / "summer"), "images/summer")
+
+    def test_display_path_is_unchanged_when_outside_root(self):
+        self.assertEqual(publish._display_path(Path("/tmp/pins")), "/tmp/pins")
+
+    def test_count_images_counts_only_image_files_non_recursively(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.png").write_bytes(b"")
+            (root / "b.JPG").write_bytes(b"")
+            (root / "c.txt").write_bytes(b"")
+            (root / "sub").mkdir()
+            (root / "sub" / "d.png").write_bytes(b"")
+            self.assertEqual(publish.count_images(root), 2)
+
+    def test_count_label_singular_plural_zero(self):
+        self.assertEqual(publish._count_label(0), "no pictures yet")
+        self.assertEqual(publish._count_label(1), "1 picture")
+        self.assertEqual(publish._count_label(2), "2 pictures")
+
+    def test_choose_images_dir_prints_counts(self):
+        summer = Path("images/summer")
+        with mock.patch.object(publish, "list_image_subdirs", return_value=[summer]), \
+             mock.patch.object(publish, "count_images", side_effect=[3, 0]), \
+             mock.patch.object(publish, "input", return_value="1"), \
+             mock.patch.object(publish, "print") as printed:
+            publish.choose_images_dir(Path("images"))
+        output = "\n".join(str(call.args[0]) for call in printed.call_args_list)
+        self.assertIn("(3 pictures, default)", output)
+        self.assertIn("(no pictures yet)", output)
+
+    def _choose_exits(self, answer: str) -> None:
+        with mock.patch.object(publish, "list_image_subdirs", return_value=[Path("images/summer")]), \
+             mock.patch.object(publish, "count_images", return_value=0), \
+             mock.patch.object(publish, "input", return_value=answer), \
+             mock.patch.object(publish, "print"):
+            with self.assertRaises(SystemExit):
+                publish.choose_images_dir(Path("images"))
+
+    def test_choose_images_dir_zero_exits(self):
+        self._choose_exits("0")
+
+    def test_choose_images_dir_negative_exits(self):
+        self._choose_exits("-1")
+
+    def test_choose_images_dir_too_large_exits(self):
+        self._choose_exits("3")
+
+    def test_main_menu_receives_optional_images_dir(self):
+        with mock.patch.object(sys, "argv", ["publish.py", "--menu", "--images-dir", "batch"]), \
+             mock.patch.object(publish, "menu") as menu:
+            publish.main()
+        menu.assert_called_once_with(images_dir=Path("batch"))
 
 
 class RunEtsyPipelineTests(unittest.TestCase):
@@ -345,6 +493,13 @@ class ChooseBoardTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 publish.choose_board(saved, "1", "these pins")
 
+    def test_zero_exits(self):
+        saved = {"pinterest_boards": self.BOARDS}
+        with mock.patch.object(publish, "input", return_value="0"), \
+             mock.patch.object(publish, "print"):
+            with self.assertRaises(SystemExit):
+                publish.choose_board(saved, "1", "these pins")
+
 
 class ResolveBoardFlagTests(unittest.TestCase):
     BOARDS = [{"name": "Blog Pins", "id": "1"}, {"name": "Shop Finds", "id": "2"}]
@@ -388,6 +543,8 @@ class MenuTests(unittest.TestCase):
     def setUp(self):
         self._patch(publish, "print")
         self._patch(publish, "load_config", return_value={})
+        self._patch(publish, "list_image_subdirs", return_value=[])
+        self._patch(publish, "count_images", return_value=0)
 
     def _patch(self, target, name, **kwargs):
         patcher = mock.patch.object(target, name, **kwargs)
@@ -398,34 +555,96 @@ class MenuTests(unittest.TestCase):
         with mock.patch.object(publish, "input", side_effect=["", "n", "n"]):
             with mock.patch.object(publish, "run_pipeline") as pipeline:
                 publish.menu()
-        pipeline.assert_called_once_with(shuffle=False, board_name=None, board_id=None, csv_only=False)
+        pipeline.assert_called_once_with(
+            shuffle=False, board_name=None, board_id=None, csv_only=False,
+            images_dir=publish.ROOT / "images",
+        )
 
     def test_choice_1_runs_pipeline(self):
         with mock.patch.object(publish, "input", side_effect=["1", "n", "n"]):
             with mock.patch.object(publish, "run_pipeline") as pipeline:
                 publish.menu()
-        pipeline.assert_called_once_with(shuffle=False, board_name=None, board_id=None, csv_only=False)
+        pipeline.assert_called_once_with(
+            shuffle=False, board_name=None, board_id=None, csv_only=False,
+            images_dir=publish.ROOT / "images",
+        )
 
     def test_choice_1_shuffle_yes_passes_shuffle_true(self):
         with mock.patch.object(publish, "input", side_effect=["1", "y", "n"]):
             with mock.patch.object(publish, "run_pipeline") as pipeline:
                 publish.menu()
-        pipeline.assert_called_once_with(shuffle=True, board_name=None, board_id=None, csv_only=False)
+        pipeline.assert_called_once_with(
+            shuffle=True, board_name=None, board_id=None, csv_only=False,
+            images_dir=publish.ROOT / "images",
+        )
 
     def test_choice_1_csv_only_yes_passes_csv_only_true(self):
         with mock.patch.object(publish, "input", side_effect=["1", "n", "y"]):
             with mock.patch.object(publish, "run_pipeline") as pipeline:
                 publish.menu()
-        pipeline.assert_called_once_with(shuffle=False, board_name=None, board_id=None, csv_only=True)
+        pipeline.assert_called_once_with(
+            shuffle=False, board_name=None, board_id=None, csv_only=True,
+            images_dir=publish.ROOT / "images",
+        )
+
+    def test_choice_1_prompts_for_folder_when_subdirs_exist(self):
+        summer = Path("images/summer")
+        self._patch(publish, "list_image_subdirs", return_value=[summer])
+        with mock.patch.object(publish, "input", side_effect=["1", "2", "n", "n"]):
+            with mock.patch.object(publish, "run_pipeline") as pipeline:
+                publish.menu()
+        pipeline.assert_called_once_with(
+            shuffle=False, board_name=None, board_id=None, csv_only=False,
+            images_dir=summer,
+        )
+
+    def test_choice_1_folder_prompt_defaults_to_images(self):
+        self._patch(publish, "list_image_subdirs", return_value=[Path("images/summer")])
+        with mock.patch.object(publish, "input", side_effect=["1", "", "n", "n"]):
+            with mock.patch.object(publish, "run_pipeline") as pipeline:
+                publish.menu()
+        pipeline.assert_called_once_with(
+            shuffle=False, board_name=None, board_id=None, csv_only=False,
+            images_dir=publish.ROOT / "images",
+        )
+
+    def test_choice_1_bad_folder_number_exits(self):
+        self._patch(publish, "list_image_subdirs", return_value=[Path("images/summer")])
+        with mock.patch.object(publish, "input", side_effect=["1", "9"]):
+            with self.assertRaises(SystemExit):
+                publish.menu()
+
+    def test_choice_1_given_images_dir_skips_folder_prompt(self):
+        with mock.patch.object(publish, "input", side_effect=["1", "n", "n"]):
+            with mock.patch.object(publish, "run_pipeline") as pipeline:
+                publish.menu(images_dir=Path("campaigns/fall"))
+        pipeline.assert_called_once_with(
+            shuffle=False, board_name=None, board_id=None, csv_only=False,
+            images_dir=Path("campaigns/fall"),
+        )
 
     def test_choice_1_prompts_for_board_when_boards_are_cached(self):
         boards = [{"name": "Blog Pins", "id": "1"}, {"name": "Other Board", "id": "2"}]
         self._patch(publish, "load_config", return_value={"pinterest_boards": boards, "board_id": "1"})
-        with mock.patch.object(publish, "input", side_effect=["1", "n", "n", "2"]):
+        with mock.patch.object(publish, "input", side_effect=["1", "2", "n", "n"]):
             with mock.patch.object(publish, "run_pipeline") as pipeline:
                 publish.menu()
         pipeline.assert_called_once_with(
-            shuffle=False, board_name="Other Board", board_id="2", csv_only=False
+            shuffle=False, board_name="Other Board", board_id="2", csv_only=False,
+            images_dir=publish.ROOT / "images",
+        )
+
+    def test_choice_1_asks_folder_then_board_then_shuffle_then_csv(self):
+        summer = Path("images/summer")
+        boards = [{"name": "Blog Pins", "id": "1"}, {"name": "Other Board", "id": "2"}]
+        self._patch(publish, "list_image_subdirs", return_value=[summer])
+        self._patch(publish, "load_config", return_value={"pinterest_boards": boards, "board_id": "1"})
+        with mock.patch.object(publish, "input", side_effect=["1", "2", "2", "y", "y"]):
+            with mock.patch.object(publish, "run_pipeline") as pipeline:
+                publish.menu()
+        pipeline.assert_called_once_with(
+            shuffle=True, board_name="Other Board", board_id="2", csv_only=True,
+            images_dir=summer,
         )
 
     def test_choice_2_asks_how_many_then_run_now(self):

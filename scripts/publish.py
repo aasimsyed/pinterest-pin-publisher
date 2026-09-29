@@ -18,6 +18,9 @@ Usage:
     python scripts/publish.py
     python scripts/publish.py --shuffle         # randomize post order instead
                                                  # of filename order
+    python scripts/publish.py --images-dir images/summer
+                                                 # publish pictures from this
+                                                 # folder instead of images
     python scripts/publish.py --dedupe-queue    # remove duplicate-titled
                                                  # rows already queued,
                                                  # keeping the oldest of
@@ -94,6 +97,8 @@ from cloudflare_ops import (
 )
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
+ROOT = SCRIPTS_DIR.parent
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg")
 STEPS = [
     ("Reading your pin images and writing titles/descriptions", "generate_pinterest_csv.py"),
     ("Matching each pin to a blog post link", "match_wordpress_links.py"),
@@ -275,6 +280,71 @@ def cached_boards(saved: dict) -> list[dict]:
     return boards if isinstance(boards, list) and boards else []
 
 
+def _pick_index(raw: str, count: int, what: str) -> int:
+    """Turn a 1-based menu answer into a 0-based index, or exit if it is out of range."""
+    try:
+        index = int(raw) - 1
+    except ValueError:
+        sys.exit(f"That was not a valid {what} number.")
+    if not 0 <= index < count:
+        sys.exit(f"That was not a valid {what} number.")
+    return index
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def count_images(folder: Path) -> int:
+    return sum(1 for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES)
+
+
+def _count_label(n: int) -> str:
+    if n == 0:
+        return "no pictures yet"
+    return f"{n} picture" if n == 1 else f"{n} pictures"
+
+
+def resolve_images_dir(saved: dict, images_dir: Path | None) -> Path:
+    """Explicit --images-dir wins, used as typed. Otherwise the setup folder
+    (or images), relative to the project so it works from any directory."""
+    if images_dir is not None:
+        return images_dir
+    return ROOT / config_value(saved, "images_dir", "images")
+
+
+def list_image_subdirs(images_dir: Path) -> list[Path]:
+    """Immediate subfolders, skipping hidden and generated ones (names starting with . or _)."""
+    if not images_dir.is_dir():
+        return []
+    return sorted(
+        (p for p in images_dir.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))),
+        key=lambda p: p.name.lower(),
+    )
+
+
+def choose_images_dir(images_dir: Path) -> Path:
+    """Ask which folder to publish from when images_dir has subfolders.
+
+    The folder itself stays the default, so pressing Enter keeps using it.
+    """
+    subdirs = list_image_subdirs(images_dir)
+    if not subdirs:
+        return images_dir
+    options = [images_dir, *subdirs]
+    print("\nWhich image folder should these pins come from?\n")
+    for i, folder in enumerate(options, 1):
+        label = _count_label(count_images(folder))
+        if folder == images_dir:
+            label = f"{label}, default"
+        print(f"  {i}. {_display_path(folder)}  ({label})")
+    choice = input("Number of the folder [1]: ").strip() or "1"
+    return options[_pick_index(choice, len(options), "folder")]
+
+
 def choose_board(saved: dict, default_id: str, prompt_label: str) -> tuple[str | None, str | None]:
     """Ask which board this one run should post to, defaulting to whatever
     was picked last (in setup or a previous run). Nothing is saved back --
@@ -293,10 +363,7 @@ def choose_board(saved: dict, default_id: str, prompt_label: str) -> tuple[str |
         marker = "  (default)" if i - 1 == default_index else ""
         print(f"  {i}. {board.get('name', '(no name)')}{marker}")
     choice = input(f"Number of the board [{default_index + 1}]: ").strip() or str(default_index + 1)
-    try:
-        board = boards[int(choice) - 1]
-    except (ValueError, IndexError):
-        sys.exit("That was not a valid board number.")
+    board = boards[_pick_index(choice, len(boards), "board")]
     return str(board.get("name") or ""), str(board.get("id") or "")
 
 
@@ -343,7 +410,7 @@ def publish_csv(csv_path: Path, board_id: str | None) -> None:
 def run_pipeline(
     shuffle: bool = False, force_requeue: bool = False,
     board_name: str | None = None, board_id: str | None = None,
-    csv_only: bool = False,
+    csv_only: bool = False, images_dir: Path | None = None,
 ) -> None:
     csv_path = SCRIPTS_DIR.parent / "pinterest_bulk_upload.csv"
     steps = STEPS[:-1] if csv_only else STEPS
@@ -351,6 +418,8 @@ def run_pipeline(
         extra_args = None
         if script_name == "generate_pinterest_csv.py":
             extra_args = []
+            if images_dir is not None:
+                extra_args += ["--images-dir", str(images_dir)]
             if shuffle:
                 extra_args.append("--shuffle")
             if force_requeue:
@@ -417,7 +486,7 @@ def _ask_yes_no(prompt: str) -> bool:
     return input(prompt).strip().lower() in ("y", "yes")
 
 
-def menu() -> None:
+def menu(images_dir: Path | None = None) -> None:
     etsy_configured = bool(config_value(load_config(), "etsy_api_key"))
     print("What do you want to do?\n")
     print("  1. Publish new pins (the usual)")
@@ -436,11 +505,16 @@ def menu() -> None:
         print("Nothing to do.")
         return
     if choice == "1":
+        saved = load_config()
+        if images_dir is None:
+            images_dir = choose_images_dir(resolve_images_dir(saved, None))
+        board_name, board_id = choose_board(saved, config_value(saved, "board_id"), "these new pins")
         shuffle = _ask_yes_no("Shuffle the post order instead of posting them in filename order? [y/N] ")
         csv_only = _ask_yes_no("Only build the CSV without scheduling it yet? [y/N] ")
-        saved = load_config()
-        board_name, board_id = choose_board(saved, config_value(saved, "board_id"), "these new pins")
-        run_pipeline(shuffle=shuffle, board_name=board_name, board_id=board_id, csv_only=csv_only)
+        run_pipeline(
+            shuffle=shuffle, board_name=board_name, board_id=board_id,
+            csv_only=csv_only, images_dir=images_dir,
+        )
         return
     if choice == "2":
         raw = input("How many pins? [3]: ").strip() or "3"
@@ -543,6 +617,12 @@ def main() -> None:
         help="Show a numbered list of every publish option.",
     )
     parser.add_argument(
+        "--images-dir", default=None, type=Path,
+        help="Folder of pin images to publish. Default: images (or the folder saved in setup), "
+             "relative to this project. With --menu, giving this skips the subfolder question. "
+             "Not used with --etsy.",
+    )
+    parser.add_argument(
         "--shuffle", action="store_true",
         help="Randomize the post order instead of scheduling pins in filename order. "
              "With --run-now, picks which pending pins to post randomly instead of "
@@ -589,8 +669,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.etsy and args.images_dir is not None:
+        parser.error("--images-dir does not apply to --etsy. Etsy pins are built from "
+                     "your listing photos, not the images folder.")
+
     if args.menu:
-        menu()
+        menu(images_dir=args.images_dir)
         return
     if args.list_boards:
         list_boards_command()
@@ -632,6 +716,7 @@ def main() -> None:
     run_pipeline(
         shuffle=args.shuffle, force_requeue=args.force_requeue,
         board_name=board_name, board_id=board_id, csv_only=args.csv_only,
+        images_dir=resolve_images_dir(saved, args.images_dir),
     )
 
 
