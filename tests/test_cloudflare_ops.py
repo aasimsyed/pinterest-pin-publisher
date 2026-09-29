@@ -90,10 +90,39 @@ class WranglerEnvTests(unittest.TestCase):
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         with mock.patch.object(cloudflare_ops, "load_config", lambda: {"account_id": "abc123"}), \
+             mock.patch.object(cloudflare_ops.Path, "exists", return_value=True), \
              mock.patch.object(subprocess, "run", fake_run):
             cloudflare_ops.run_wrangler(["whoami"])
 
         self.assertEqual(captured["env"]["CLOUDFLARE_ACCOUNT_ID"], "abc123")
+
+
+class InvokeWranglerTests(unittest.TestCase):
+    def test_uses_the_pinned_local_binary_not_npx(self):
+        captured = {}
+
+        def fake_run(cmd, cwd, input, capture_output, text, env):
+            captured["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with mock.patch.object(cloudflare_ops, "load_config", lambda: {}), \
+             mock.patch.object(cloudflare_ops.Path, "exists", return_value=True), \
+             mock.patch.object(subprocess, "run", fake_run):
+            cloudflare_ops._invoke_wrangler(["whoami"])
+
+        self.assertEqual(captured["cmd"], [str(cloudflare_ops.WRANGLER_BIN), "whoami"])
+        self.assertNotIn("npx", captured["cmd"])
+
+    def test_missing_binary_raises_before_running_anything(self):
+        with mock.patch.object(cloudflare_ops.Path, "exists", return_value=False), \
+             mock.patch.object(subprocess, "run") as run:
+            with self.assertRaises(cloudflare_ops.WranglerMissingError) as ctx:
+                cloudflare_ops._invoke_wrangler(["whoami"])
+        run.assert_not_called()
+        self.assertIn("Setup", str(ctx.exception))
+
+    def test_missing_binary_is_a_wrangler_error_too(self):
+        self.assertTrue(issubclass(cloudflare_ops.WranglerMissingError, cloudflare_ops.WranglerError))
 
 
 class RunWranglerAutoReloginTests(unittest.TestCase):

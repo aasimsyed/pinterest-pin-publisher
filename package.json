@@ -1,0 +1,8 @@
+{
+  "name": "pinterest-pin-publisher",
+  "private": true,
+  "description": "Pinned Cloudflare CLI so publishing never depends on npm's latest wrangler. Installed by scripts/setup.py.",
+  "devDependencies": {
+    "wrangler": "4.139.0"
+  }
+}

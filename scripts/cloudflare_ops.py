@@ -23,6 +23,7 @@ from pathlib import Path
 from app_config import config_value, load_config
 
 ROOT = Path(__file__).resolve().parent.parent
+WRANGLER_BIN = ROOT / "node_modules" / ".bin" / ("wrangler.cmd" if os.name == "nt" else "wrangler")
 DATABASE_NAME = "pin-publisher-db"
 BUCKET_NAME = "pin-publisher-images"
 R2_DEV_URL_RE = re.compile(r"https://[\w.-]+\.r2\.dev")
@@ -33,6 +34,11 @@ WORKER_URL_RE = re.compile(r"https://[\w.-]+\.workers\.dev")
 class WranglerError(RuntimeError):
     """Raised when a wrangler command fails, with a message meant for a
     non-technical user rather than a raw stack trace."""
+
+
+class WranglerMissingError(WranglerError):
+    """Raised when the pinned wrangler isn't installed yet, so callers can
+    stop right away instead of treating it like a flaky network call."""
 
 
 class PublishTriggerError(RuntimeError):
@@ -64,8 +70,15 @@ def _looks_like_auth_error(output: str) -> bool:
 
 
 def _invoke_wrangler(args: list[str], input_text: str = "") -> subprocess.CompletedProcess:
+    """Run the wrangler pinned in package.json, never `npx wrangler`, so a
+    publish run doesn't depend on whatever npm calls latest that day."""
+    if not WRANGLER_BIN.exists():
+        raise WranglerMissingError(
+            "The Cloudflare tool (wrangler) isn't installed yet. "
+            "Double-click Setup (or run python scripts/setup.py) once, then try again."
+        )
     return subprocess.run(
-        ["npx", "wrangler", *args],
+        [str(WRANGLER_BIN), *args],
         cwd=ROOT,
         input=input_text,
         capture_output=True,

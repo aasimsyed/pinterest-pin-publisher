@@ -43,6 +43,7 @@ from anthropic_auth import load_api_key
 from app_config import config_value, load_config, save_config
 from cloudflare_ops import (
     WranglerError,
+    WranglerMissingError,
     ensure_image_bucket,
     existing_media_filenames,
     existing_titles,
@@ -238,6 +239,8 @@ def main():
     if not args.force_requeue:
         try:
             already_posted = existing_media_filenames()
+        except WranglerMissingError as e:
+            sys.exit(str(e))
         except WranglerError as e:
             print(f"  ! Could not check already-queued images ({e}); "
                   f"processing every listing.")

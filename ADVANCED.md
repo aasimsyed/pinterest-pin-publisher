@@ -12,8 +12,14 @@ Double-click Setup again, it tries to install Python automatically. If that stil
 **The window says `node` is not found**  
 Same as above, but for https://nodejs.org/ (click the **LTS** button). Setup needs this once to talk to Cloudflare.
 
+**The window says the Cloudflare tool (wrangler) isn't installed yet**  
+Double-click Setup once. It installs the exact version of Cloudflare's tool this app was tested with, into this folder, so publishing never depends on whatever was released that day.
+
 **The window says no images found**  
-Put `.png` or `.jpg` files directly in the `images` folder, not in a subfolder, then double-click Publish Pins again.
+Put `.png` or `.jpg` files in the `images` folder, or in the folder you picked from the list, then double-click Publish Pins again.
+
+**A picture in a subfolder gets skipped as already posted**  
+Give every picture a different file name, even across folders. Two pictures called `01.png` in different folders count as the same pin, so the second one gets skipped.
 
 **The Pinterest browser page does nothing, or Setup says the redirect failed**  
 Open your Pinterest app at https://developers.pinterest.com/apps/. The redirect URL must be exactly `http://localhost:8765/callback`. Save, then run Setup again.
@@ -105,7 +111,7 @@ Normally, a picture already queued or posted gets skipped automatically. If you 
 python scripts/publish.py --force-requeue
 ```
 
-This re-processes every picture currently in `images`, not just the new ones, so only use it when you mean to.
+This re-processes every picture in the folder you chose (`images` by default), not just the new ones, so only use it when you mean to.
 
 ### Build the CSV now, schedule it later
 

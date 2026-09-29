@@ -63,6 +63,12 @@ def install_packages() -> None:
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "-r", str(ROOT / "requirements.txt")]
     )
+    print("\nInstalling the Cloudflare tool (this may take a minute)...\n")
+    npm = "npm.cmd" if sys.platform == "win32" else "npm"
+    lockfile = ROOT / "package-lock.json"
+    subprocess.check_call(
+        [npm, "ci" if lockfile.exists() else "install", "--no-audit", "--no-fund"], cwd=ROOT,
+    )
     print()
 
 
